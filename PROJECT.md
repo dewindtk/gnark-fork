@@ -12,6 +12,13 @@ FRI's soundness doesn't depend on which field it runs over — "FRI over bn254 f
 
 Primary reference: `resources/2019-1400.pdf` — RedShift (Kattis/Panarin/Vlasov, CCS'22), the paper describing exactly this transformation (their "List Polynomial Commitment" wrapping FRI, Algorithm 2). Full architecture study (KZG seams): https://claude.ai/code/artifact/42bcd5a9-2492-4e0b-ae97-8c4efa2c89a4
 
+Reference papers, all in `resources/` (committed):
+- `2019-1400.pdf` — RedShift: Transparent SNARKs from List Polynomial Commitments (primary reference, above)
+- `Revision2OfTR17-134.pdf` — Fast Reed-Solomon Interactive Oracle Proofs of Proximity (the original FRI paper, Ben-Sasson/Bentov/Horesh/Riabzev)
+- `2019-336 (1).pdf` — DEEP-FRI: Sampling Outside the Box Improves Soundness
+- `2020-654.pdf` — Proximity Gaps for Reed–Solomon Codes
+- `out.txt` — plain-text extraction of the RedShift paper, used for quick grep/search during the design walkthrough
+
 `std/recursion/plonk` (in-circuit recursive PLONK verification) is deeply KZG/pairing-specific (G1El/G2El, emulated field arithmetic) — a FRI backend cannot plug into it. A FRI-based recursive verifier would be new, built on `std/commitments/fri`, and is out of scope for v1.
 
 ## Design decisions (locked in for v1)
@@ -150,7 +157,6 @@ Replay Fiat-Shamir from the proof's published roots + public inputs to get `beta
 - [ ] Start Phase 0: restore `backend/plonkfri/bn254` from `1ed22f78^`, repoint import to `internal/nativefri`.
 - [ ] Phase 1: check `constraint/bn254.SparseR1CS`'s `Solve()`/`SparseR1CSSolution` API drift since 2024 against what `prove.go` calls.
 - [ ] Read `computeQuotientCanonical`'s coset-FFT trick and the `pk.Permutation[i]` bookkeeping in `computeBlindedZCanonical` in full (not yet done).
-- [ ] Clarify what `resources/` (`2019-1400.pdf`, `out.txt`) should be: commit it (it's the working reference paper) or gitignore it.
 
 ## Session Log
 
