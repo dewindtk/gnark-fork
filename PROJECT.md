@@ -154,8 +154,10 @@ Replay Fiat-Shamir from the proof's published roots + public inputs to get `beta
 
 ## Open questions / next steps
 
-- [ ] Start Phase 0: restore `backend/plonkfri/bn254` from `1ed22f78^`, repoint import to `internal/nativefri`.
-- [ ] Phase 1: check `constraint/bn254.SparseR1CS`'s `Solve()`/`SparseR1CSSolution` API drift since 2024 against what `prove.go` calls.
+- [x] Phase 0: restore `backend/plonkfri/bn254` from `1ed22f78^`, repoint import to `internal/nativefri`.
+- [x] Phase 1: API drift check — none needed; plain-gate circuits work.
+- [x] Phase 2: shared circuit suite passes (30/30 in scope) after the 2026-10-07 fixes.
+- [ ] Decide post-v1 direction: batched openings (prover is ~10–14× slower than KZG), more curves, or in-circuit verifier.
 - [ ] Read `computeQuotientCanonical`'s coset-FFT trick and the `pk.Permutation[i]` bookkeeping in `computeBlindedZCanonical` in full (not yet done).
 
 ## Session Log
@@ -173,3 +175,16 @@ Replay Fiat-Shamir from the proof's published roots + public inputs to get `beta
 - Not yet committed/merged: `prove.go`/`prove_test.go`, `verify.go`/`verify_test.go`, and the `internal/nativefri` `.ID` fix are all sitting locally, pending the user's call on when to commit.
 - **Phase 0 complete**: added `PLONKFRI` to `backend.ID` (`backend/backend.go`, mirroring the old `1ed22f78^` naming exactly: `PLONKFRI`/`"plonkFRI"`), confirmed a full-repo `go build ./...`/`go vet ./...` still passes (the only other consumer of `backend.Implemented()`, `internal/stats`, already skips backends with no precomputed stats — safe; its `generate/main.go` companion tool is a manual, non-test entry point, not fixed now, noted as a non-blocking follow-up). Added `backend/plonkfri/plonkfri.go`, a thin bn254-only dispatcher mirroring `backend/plonk/plonk.go`'s shape. Added `TestDispatcherRoundTrip`, exercising `Setup/Prove/Verify` through the dispatcher's interfaces (not the bn254 subpackage directly) — passes, confirming the type-assertion plumbing works at runtime, not just that it compiles.
 - Phase 0 is now fully done per the original plan: `backend/plonkfri/bn254/{setup,prove,verify}.go` restored and correct (round-trip + tamper test both pass), `internal/nativefri`'s real `.ID` bug fixed, `backend.ID` entry and dispatcher in place. Next is Phase 1 proper: expanding beyond the single toy circuit (more gate types, edge cases) and deciding what comes after v1 (more curves, in-circuit verifier, batched openings) per the "Open questions" list below.
+
+### 2026-10-07
+- Ran the library's shared circuit suite (`internal/backend/circuits`, the set `integration_test.go` runs against KZG PLONK/Groth16) through `plonkfri` on bn254 via new harness `backend/plonkfri/suite_test.go` (uncommitted). **28/32 pass** (valid witness proves+verifies; invalid witness rejected).
+- **Real bug found — completeness failure at `vk.Size == 2`** (`assert_equal`, `noComputationCircuit`): ~88% of honest proofs rejected (884/1000 measured), randomly depending on blinding. Root cause: `Z` is blinded with order 2 → `n+3` coefficients, but FRI degree bound is `NextPowerOfTwo(n+2)`; for `n=2` that's 4 < 5. `setup.go:138` assumes `NextPow2(Card+2) == 2·Card`, false for Card ≤ 2. Naively bumping `sizeIopp` to `+3` makes it 100% fail, because `prove.go:218`/`verify.go:67` hardcode `friSize = 2·rho·Size`. Candidate fix: enforce a minimum `Domain[0]` cardinality of 4 in Setup (keeps all invariants). Not yet applied.
+- **Expected failures (v1 scope cut)**: `commit`, `gkr_cube` use BSB22 commitments → Verify fails with "algebraic relation does not hold". Setup silently accepts such circuits; it should reject them with an explicit "unsupported" error.
+- Verify with a full witness in place of the public one is rejected, but with a misleading error ("merkle path proof is wrong"); KZG backend does an explicit length check ("witness length is invalid").
+- Perf vs KZG (bn254, `refCircuit`, M-series laptop): 4094 constraints: setup 550ms vs 16ms, prove 534ms vs 51ms, verify 0.6ms vs 1.1ms. 65534 constraints: setup 8.3s vs 0.16s, prove 9.2s vs 0.65s, verify 1.0ms vs 1.3ms. Prover ~10–14× slower, verifier slightly faster.
+- **All three fixes applied (same day)**:
+  1. Small-domain completeness bug: `Setup` now pads `Domain[0]` to at least `minDomainSize = 4` (`setup.go`). This exposed a second hidden assumption: `prove.go` used solver L/R/O vectors directly, which are only sized `NextPow2(constraints+public)`. They're now padded to the domain size via `padToDomain`, filling with **wire 0's value, not zero**. That matches the solver's own convention (`constraint/bn254/solver.go` `initSparseLRO`), because `buildPermutation` links every padding slot to wire 0. Zero-padding was tried first and broke the copy constraint.
+  2. `Setup` returns `ErrCommitmentsUnsupported` for circuits with BSB22 commitments.
+  3. `Verify` checks `len(publicWitness) == vk.NbPublicVariables` → `"witness length is invalid"` (same message as KZG backend).
+- Result: suite now **30/30 in-scope circuits pass, 2 skipped as out-of-scope** (`commit`, `gkr_cube`). New regression test `TestTinyCircuitCompleteness` (200 proofs on a 1-constraint circuit); ad-hoc stress run of 1000 proofs each on 1–2 constraint circuits with/without public inputs: 0 rejections. `go build ./...` clean.
+- Next: commit fixes + `suite_test.go`; v1 is functionally complete. Then pick post-v1 direction (batched openings for prover speed vs. more curves vs. in-circuit verifier).

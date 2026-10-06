@@ -85,9 +85,21 @@ func Prove(spr *cs.SparseR1CS, pk *ProvingKey, fullWitness witness.Witness, opts
 	}
 
 	solution := _solution.(*cs.SparseR1CSSolution)
-	evaluationLDomainSmall := []fr.Element(solution.L)
-	evaluationRDomainSmall := []fr.Element(solution.R)
-	evaluationODomainSmall := []fr.Element(solution.O)
+	// the solver pads L, R, O to the next power of two of the system size; Setup
+	// may use a larger domain (see minDomainSize), so pad the extra rows the way
+	// the solver pads its own: with the value of wire 0, which buildPermutation
+	// links every padding slot to.
+	fw, ok := fullWitness.Vector().(fr.Vector)
+	if !ok {
+		return nil, witness.ErrInvalidWitness
+	}
+	var wire0 fr.Element
+	if len(fw) > 0 {
+		wire0 = fw[0]
+	}
+	evaluationLDomainSmall := padToDomain(solution.L, &pk.Domain[0], wire0)
+	evaluationRDomainSmall := padToDomain(solution.R, &pk.Domain[0], wire0)
+	evaluationODomainSmall := padToDomain(solution.O, &pk.Domain[0], wire0)
 
 	// 2 - commit to lro
 	blindedLCanonical, blindedRCanonical, blindedOCanonical, err := computeBlindedLROCanonical(
@@ -112,10 +124,6 @@ func Prove(spr *cs.SparseR1CS, pk *ProvingKey, fullWitness witness.Witness, opts
 	}
 
 	// 3 - compute Z, challenges are derived using L, R, O + public inputs
-	fw, ok := fullWitness.Vector().(fr.Vector)
-	if !ok {
-		return nil, witness.ErrInvalidWitness
-	}
 	dataFiatShamir := make([][fr.Bytes]byte, len(spr.Public)+3)
 	for i := 0; i < len(spr.Public); i++ {
 		copy(dataFiatShamir[i][:], fw[i].Marshal())
@@ -538,6 +546,20 @@ func computeQuotientCanonical(pk *ProvingKey, evaluationConstraintsIndBitReverse
 //     (l_i+s1+gamma)*(r_i+s2+gamma)*(o_i+s3+gamma)
 //
 //   - l, r, o are the solution in Lagrange basis
+//
+// padToDomain returns v padded with fill up to the cardinality of domain.
+func padToDomain(v fr.Vector, domain *fft.Domain, fill fr.Element) []fr.Element {
+	if uint64(len(v)) >= domain.Cardinality {
+		return v
+	}
+	res := make([]fr.Element, domain.Cardinality)
+	copy(res, v)
+	for i := len(v); i < len(res); i++ {
+		res[i] = fill
+	}
+	return res
+}
+
 func computeBlindedZCanonical(l, r, o []fr.Element, pk *ProvingKey, beta, gamma fr.Element) ([]fr.Element, error) {
 
 	// note that z has more capacity has its memory is reused for blinded z later on

@@ -18,11 +18,21 @@ package plonkfri
 
 import (
 	"crypto/sha256"
+	"errors"
+
 	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
 	"github.com/consensys/gnark-crypto/ecc/bn254/fr/fft"
 	cs "github.com/consensys/gnark/constraint/bn254"
 	"github.com/consensys/gnark/internal/nativefri"
 )
+
+// minDomainSize is the smallest Domain[0] cardinality for which the FRI
+// domain sizing in Setup is valid (see Setup).
+const minDomainSize = 4
+
+// ErrCommitmentsUnsupported is returned by Setup for circuits using BSB22
+// commitments, which plonkfri does not support yet.
+var ErrCommitmentsUnsupported = errors.New("plonkfri: circuits with commitments (api.Commit) are not supported")
 
 // ProvingKey stores the data needed to generate a proof:
 // * the commitment scheme
@@ -103,6 +113,13 @@ func Setup(spr *cs.SparseR1CS) (*ProvingKey, *VerifyingKey, error) {
 	var pk ProvingKey
 	var vk VerifyingKey
 
+	// v1 scope: plain PLONK gates only. BSB22 commitments (api.Commit, used
+	// e.g. by GKR) are not supported -- reject them here rather than produce
+	// proofs that can never verify.
+	if len(spr.GetCommitments().CommitmentIndexes()) > 0 {
+		return nil, nil, ErrCommitmentsUnsupported
+	}
+
 	// The verifying key shares data with the proving key
 	pk.Vk = &vk
 
@@ -110,6 +127,12 @@ func Setup(spr *cs.SparseR1CS) (*ProvingKey, *VerifyingKey, error) {
 
 	// fft domains
 	sizeSystem := uint64(nbConstraints + len(spr.Public)) // len(spr.Public) is for the placeholder constraints
+	// The FRI domain below is sized for NextPowerOfTwo(Cardinality+2) and assumed
+	// to equal 2*Cardinality; Z (blinded with order 2) has Cardinality+3
+	// coefficients. Both only hold for Cardinality >= 4, so pad tiny systems.
+	if sizeSystem < minDomainSize {
+		sizeSystem = minDomainSize
+	}
 	pk.Domain[0] = *fft.NewDomain(sizeSystem)
 
 	// h, the quotient polynomial is of degree 3(n+1)+2, so it's in a 3(n+2) dim vector space,

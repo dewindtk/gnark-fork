@@ -28,10 +28,16 @@ import (
 
 var ErrInvalidAlgebraicRelation = errors.New("algebraic relation does not hold")
 
+var errInvalidWitness = errors.New("witness length is invalid")
+
 func Verify(proof *Proof, vk *VerifyingKey, publicWitness fr.Vector, opts ...backend.VerifierOption) error {
 	cfg, err := backend.NewVerifierConfig(opts...)
 	if err != nil {
 		return fmt.Errorf("create backend config: %w", err)
+	}
+
+	if len(publicWitness) != int(vk.NbPublicVariables) {
+		return errInvalidWitness
 	}
 
 	// 0 - derive the challenges with Fiat Shamir
