@@ -242,7 +242,7 @@ Done: Phase 0–2 (restore, compile, shared circuit suite 30/30); security fix A
 - **B2 done (2026-10-07):** `internal/nativefri/batch.go` (`Scheme`, `Commit`, `Open`, `Verify`) + `batch_test.go`, alongside the old API (removed in B3). 
 - **B3 done:** setup/prove/verify on `Scheme`; old per-polynomial `nativefri` API removed. B4 tests: in-domain-zeta forgery 0/800, lie-at-zeta 0/200, witness-leak 0/516.
 
-**Step 2 — Fix C: blinding vs revealed evaluations (zero-knowledge).** Also add a separate random blinding polynomial to the FRI batch (consideration 2, [HK24]). After B the exact count is known: each committed poly is revealed at ~2·86 FRI positions + its `zeta` openings → blinding degree must be ≥ that; FRI degree bound/domain sizing must absorb it. RedShift samples outside D for perfect ZK — check §6.
+**Step 2 — Fix C: zero-knowledge. C1 design drafted 2026-10-07 — see "Fix C design (C1)" below; decisions 1–3 approved (173, mask always on, larger tiny proofs). Next: C2 red test.** Original note: Also add a separate random blinding polynomial to the FRI batch (consideration 2, [HK24]). After B the exact count is known: each committed poly is revealed at ~2·86 FRI positions + its `zeta` openings → blinding degree must be ≥ that; FRI degree bound/domain sizing must absorb it. RedShift samples outside D for perfect ZK — check §6.
 
 **Decided — security target (consideration 4):** option (a), classical 128 bits + "plausibly PQ" (see Design decisions). To revisit: explicit PQ target after reading [CMS19] / Chiesa–Yogev / NIST PQC criteria; optional grinding to trade queries for prover work.
 
@@ -323,6 +323,60 @@ KZG PLONK at 65534 for reference: setup 0.16 s, prove 0.65 s, verify 1.3 ms, pro
 1. **D5 multi-poly leaves** — recommended; the alternative (one tree per poly) is a smaller diff but keeps ~15 Merkle paths per query.
 2. **D1 on ζ ∈ D' ∪ H**: reject (honest prover fails with prob ~2^-230) vs re-derive with a counter. Recommended: reject — simpler, standard.
 3. FRI code is 2× larger than needed (degrees ~n+3 force k = 2n). Accept for now; optimization later (e.g. smaller blinding or splitting).
+
+## Fix C design (C1) — drafted 2026-10-07, decisions approved
+
+### C.0 The problem, in one paragraph
+Zero-knowledge means: everything the verifier sees could have been produced without the witness. The verifier sees each secret polynomial (l, r, o, z, h1–h3) at up to **174 points** — ζ, ω·ζ (z only), and the pair {x, −x} of each of the 86 FRI queries — plus every folded FRI layer value. Today l, r, o carry 2 random coefficients, z 3, h1–h3 none, and the FRI layers have no mask. After fix B the raw-wire leak on H is gone (0/516), but the revealed values are still functions of the witness with far too little randomness to hide it.
+
+### C.1 The idea, and why it works (HK24 Lemma 1)
+Blind a witness polynomial as `ŵ(X) = w(X) + Z_H(X)·r(X)` with r uniformly random with `b` coefficients. On H nothing changes (`Z_H = 0` there), so the circuit identity still holds. At any revealed point x ∉ H, `ŵ(x) = w(x) + Z_H(x)·r(x)`. If there are m ≤ b distinct revealed points, the map `r ↦ (Z_H(xᵢ)·r(xᵢ))ᵢ` is a (scaled) m×b Vandermonde map of **full rank m** — so it hits every vector of values equally often, and the revealed values are uniformly random **whatever w is**. That is the whole argument; it needs (1) points outside H (fix B's coset + ζ ∉ H) and (2) `b ≥ number of distinct revealed points`. Source: `2024-1037` Lemma 1 (with e = 1: we work in the base field, no extension), RedShift `2019-1400` App. D.3.
+
+The same idea is applied twice more: to the quotient pieces (they are revealed too, `2024-1037` §4.1, Lemma 4) and to the FRI folding layers via a mask polynomial (`2024-1037` Protocol 2, Lemma 2) — blinding the inputs does not protect the folds, because each fold halves the randomizer space (`Z_H` is even, so `Z_H·F[X]<b` folds into `Z_{H²}·F[X]<b/2`) while the witness part keeps its structure (`2024-1037` §2).
+
+### C.2 Protocol changes
+1. **Witness blinding (C-a):** l, r, o, z: `ŵ = w + Z_H·r`, r with **b = 174** random coefficients (was 2 / 3).
+2. **Randomized quotient split (C-b):** h = h1 + Xᵏ·h2 + X²ᵏ·h3 (canonical split, k = piece size). Prover draws t1, t2 with **173** random coefficients and commits `ĥ1 = h1 + Xᵏ·t1`, `ĥ2 = h2 + Xᵏ·t2 − t1`, `ĥ3 = h3 − t2`. The sum telescopes back to h, so the verifier's equation is unchanged (`2024-1037` §4.1 eq. (8); GWC19 for the 1-coefficient version).
+3. **Mask polynomial (C-c):** inside `nativefri.Scheme.Open`, before λ: the prover samples R uniformly with `DegreeBound − 1` coefficients, commits it (own Merkle tree), binds its root into the transcript, and runs FRI on `R + Σₜ λᵗ⁺¹·(fₜ − vₜ)/(X − zₜ)`. The verifier opens R at each query like any commitment.
+
+### C.3 Design decisions
+| # | Decision | Why | Source |
+|---|---|---|---|
+| C1 | b = 174 for l, r, o, z | Distinct revealed points: z: ζ, ωζ, ≤ 2·86 FRI points = 174; l, r, o: 173. One value for all = HK24's bound `2·(e·n_F + n_D)` = 2·(1+86) = 174 — independent derivation and paper agree | `2024-1037` eq. (10), Lemma 1 |
+| C2 | t1, t2 with **173** coefficients (user decision) | h pieces are revealed at ζ + ≤ 172 FRI points = 173. HK24 eq. (9) only asks `n_F + n_D` = 87 — likely counts one point per FRI query, while our FRI reveals the pair {x, −x}. Not reconciled → take the count that is certainly sufficient; cost is ~173 coefficients per piece | `2024-1037` §4.1, Lemma 4; own count |
+| C3 | Mask R **always on** in `Scheme` (user decision) | PLONK is the only user and must be ZK; one code path, no flag to forget. Cost: one tree + 86 pair openings | `2024-1037` Protocol 2 step 1 |
+| C4 | R committed **before λ**, coefficient 1; claims get λ¹, λ², … (today λ⁰, λ¹, …) | If R shared a coefficient with a claim, a cheater could commit a non-low-degree "R" = (low-degree P) − (false quotient Q₀): FRI only sees R + Q₀ = P and accepts. Distinct powers + R bound before λ → correlated agreement applies to R and each quotient separately | `2024-1037` eq. (2) (claims start at λ¹); found while deriving C-c |
+| C5 | R has `DegreeBound − 1` coefficients | The decoupling argument needs R uniform over the whole space the quotients live in (degree < DegreeBound − 1), so R + (quotients) is uniform there regardless of the witness | `2024-1037` Lemma 2 (`R ∈ F[X]<|H|+h−1`) |
+| C6 | Sizes become computed VK parameters: piece size k, quotient domain, DegreeBound; k and DegreeBound in `vk.digest()` | Today `n+2` is hard-coded in setup, prove and verify (the tiny-circuit bug came from such a coupling). One computation, bound into the transcript → prover and verifier cannot disagree | lesson from `minDomainSize`, D10 |
+| C7 | Accept larger proofs for tiny circuits (DegreeBound ≥ 512) (user decision) | Blinding adds ~400 coefficients regardless of n; for n ≥ 512 the bound stays 2n | — |
+| C8 | Preprocessed polys stay unblinded | They are public | — |
+| C9 | No extra measure for the permutation-argument leak | Reveals only "β, γ ≠ special values"; statistical, negligible in a 254-bit field; perfect ZK would need more | `2024-1037` App. A |
+
+### C.4 Parameters and degrees (n = |H|, b = 174, t = 173)
+- l̂, r̂, ô, ẑ: n + b coefficients.
+- Identity numerator degree: max of gate `qm·l·r` (3n + 2b − 3) and permutation `z(ωX)·∏(l + β·s + γ)` (**4n + 4b − 4**). Divided by Z_H (degree n): **deg h = 3n + 4b − 4**, i.e. 3n + 4b − 3 coefficients. (Check against today, b = 2/3: 3n + 6 coefficients → pieces n + 2 ✓.)
+- Piece size: k = n + ⌈4b/3⌉ = **n + 232** (HK24's k̂; 3k = 3n + 696 ≥ 3n + 693 ✓).
+- Randomized pieces: ĥ1, ĥ2 have k + t = **n + 405** coefficients — the largest committed polynomials.
+- `DegreeBound = NextPow2(n + 405)`: n = 4 → 512; n = 512 → 1024 = 2n; n ≥ 512 → 2n (unchanged from today).
+- Quotient domain: |Domain[1]| = NextPow2(3k) (must exceed deg h): n = 65536 → 4n (unchanged); small n larger.
+- Mask R: DegreeBound − 1 coefficients.
+
+### C.5 Code plan
+- **C2 (red first):** constants `nbBlindWitness`, `nbBlindQuotient` introduced in `prove.go` *with today's values* (behaviour unchanged); `nativefri` gains `(*Scheme).QueriedPoints(...)` (replays the transcript, returns the layer-0 points a proof reveals). Test `TestRevealedValuesAreUniform`: for a real proof, per secret polynomial, collect distinct revealed points, build the matrix `[Z_H(xᵢ)·xᵢʲ]` (j < blinding coefficients) and require **full row rank** (Lemma 1's exact condition) — fails today. Plus a check that the committed polys really have n + b coefficients (the test must measure what the prover does, not just a constant).
+- **C3 `nativefri`:** mask R in `Open`/`Verify`; claims shifted to λ¹…; `BatchProof` gains `Mask` root + per-query opening. Tests: completeness; R tampering rejected; the C4 attack (R = P − Q₀ with false Q₀) rejected 0/100; B2 cheater tests still 0/100.
+- **C4 `plonkfri`:** blinding b = 174; randomized split with k; `Setup` computes k, Domain[1], DegreeBound (C6); verifier RHS uses ζᵏ instead of ζⁿ⁺².
+- **C5:** rank test green; attack tests 0/800, 0/200; leak 0; suite 30/30 + tiny 200; perf.
+
+### C.6 Expected cost (estimates before coding)
+- Proof size: + mask tree openings ≈ 86 × (2·32 B + 19·32 B path) ≈ **+58 KB at 65k** (→ ~0.90 MB), ≈ +47 KB at 4k (→ ~0.65 MB).
+- Prove time at 65k: same domains (DegreeBound and quotient domain unchanged); + one commitment of R (FFT on |D| + Merkle) → **~+5–10 %** (~2.1 s).
+- Tiny circuits (n = 4): DegreeBound 8 → 512, |D| 64 → 4096 → proofs of a few hundred KB, ms-level time.
+- Soundness unchanged: 86 queries, ρ = 1/8 (rate is defined by DegreeBound, which only grows for tiny n with |D| = 8·DegreeBound).
+
+### C.7 Open points
+1. Reconcile HK24 eq. (9)/(10) counting of FRI query points (one vs pair) — affects only whether 173 could be 87 later.
+2. ZK is *honest-verifier* in the IOP; with Fiat-Shamir it becomes NIZK in the random-oracle model (standard; BCS) — no extra work, noted for the write-up.
+3. Prover randomness comes from `fr.SetRandom` (crypto/rand) — fine; a deterministic RNG would break ZK.
 
 ## Session Log
 
@@ -424,3 +478,10 @@ Measured per-query acceptance of garbage = 1/8 = ρ, i.e. the conjectured regime
 - Perf/size measured (B.5 table): 65k constraints prove 6.8 s → 1.97 s, verify 69 → 4.5 ms, proof ≈ 0.84 MB (estimate 0.9).
 - Known caveat: `Scheme` holds one `hash.Hash`, so a VK must not be used by concurrent goroutines (same as before B). Fix with a hash constructor when needed.
 - Next: fix C (zero-knowledge): blinding degree vs ~2·86 revealed points + ζ openings, mask polynomial R in the batch (HK24 Protocol 2), randomized quotient pieces.
+
+### 2026-10-07 (cont.) — C1: fix C design
+- Read `2024-1037` Protocol 1–3, Lemma 1–2, §4.1 (canonical split randomization, Lemma 4). §4.1 is exactly our h1/h2/h3 split.
+- Derived parameters from first principles and compared with the paper: witness blinding b = 174 (own count = HK24 eq. (10)); quotient randomizer 173 (own count) vs HK24's 87 — unreconciled (one vs two points per FRI query); user chose 173. Mask always on; tiny circuits get DegreeBound ≥ 512 (user decisions).
+- **Found while deriving:** the mask R must not share the coefficient λ⁰ with the first claim — otherwise a cheater commits "R" = P − Q₀ for a false quotient Q₀ and FRI, which only sees R + Q₀, accepts. Claims move to λ¹, λ², … (as in HK24 eq. (2)); a test for this attack is planned in C3.
+- Degree check of the derivation against today's code (b = 2/3 → pieces n+2 ✓) before trusting it for b = 174.
+- Testing choice: ZK can't be tested statistically (every 254-bit value looks random); test the structural condition of Lemma 1 (full rank of the blinding map on the revealed points) instead, red first.
