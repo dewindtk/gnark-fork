@@ -248,16 +248,43 @@ Done: Phase 0–2 (restore, compile, shared circuit suite 30/30); security fix A
 
 **Step 3 — Malicious-prover test harness.** A reusable way to build deliberately bad proofs (lying openings, pointwise-H, bad-gate witness) so every soundness claim has a test that a cheater fails. Largely built during B4/C3: `prove(…, transcriptPublic)`, `testHookBeforeOpen`, `Scheme.commit`/`commitEvals`/`open(…, mask)`, `firstClaimPower`. Remaining: collect them behind one documented test helper; add pointwise-H and wrong-permutation cheaters.
 
-**After "sound + ZK"** (pick by priority):
-- Proof serialization (`WriteTo`/`ReadFrom`) — none exists; needed for any real use.
-- Size/speed: Merkle path dedup / caps, parallel hashing.
-- Phase 3: port fix A/B to the in-circuit gadget, Poseidon2, recursive verifier.
-- Features: BSB22 commitments, more curves.
-- Housekeeping: `internal/stats/generate/main.go`.
-- Concurrency: `nativefri.Scheme` holds one `hash.Hash` → a VK can't be shared across goroutines; use a hash constructor.
-- Tiny circuits: ZK blinding sets DegreeBound ≥ 512 (2-constraint proof 0.43 MB); could size blinding by the actual domain (fewer distinct query points when |D| is small) if it matters.
-- Reconcile HK24's quotient-randomizer count (87) with ours (173) — C.7 point 1.
-- External review of fixes A–C before any real use.
+**After "sound + ZK"** → see **"Follow-ups (after fixes A–C)"** below (F1–F12, prioritized).
+
+## Follow-ups (after fixes A–C) — recorded 2026-10-07
+
+Status at this point: plonkfri on bn254 is sound (fix A + B) and honest-verifier zero-knowledge (fix C) by construction, with a test per mechanism; **not externally reviewed**. Items are grouped by when they matter; within a group, roughly by priority. Each has a "done when" so it can be worked test-first like A–C.
+
+### Before any real use
+| # | Follow-up | Why | Approach | Done when |
+|---|---|---|---|---|
+| F1 | **External review** of fixes A–C | All analysis and tests so far are self-made; a reviewer catches what the author can't (the `ClaimedValue` hole was only found by re-reading). | Hand a reviewer PROJECT.md (designs B1/C1 with sources) + the attack/ZK tests as the claims to check. | Review findings triaged; each accepted finding has a red test → fix. |
+| F2 | **Proof / VK serialization** (`WriteTo`/`ReadFrom`, as in `backend/plonk`) | No format exists: proofs can't leave the process. Parsing is also an attack surface (malformed lengths, non-canonical field elements). | Length-prefixed fields; decode field elements with `SetBytesCanonical`; reject trailing bytes. | Round-trip test; fuzz test (`go test -fuzz`) never panics; serialized size matches `proofSize`. |
+| F3 | **Concurrency:** `nativefri.Scheme` holds one `hash.Hash` | A VK shared by goroutines (normal in a server) races on the hash state → wrong challenges / spurious rejects. Pre-existing (old `Iopp` had the same). | Store a hash constructor (`func() hash.Hash`) and create a hasher per Commit/Open/Verify call. | `go test -race` with parallel Verify/Prove on one VK passes. |
+
+### Robustness of the security claims
+| # | Follow-up | Why | Approach | Done when |
+|---|---|---|---|---|
+| F4 | **Malicious-prover harness** (old Step 3) | Every soundness claim should have a cheater that fails. The pieces exist but are scattered: `prove(…, transcriptPublic)`, `testHookBeforeOpen`, `Scheme.commit`/`commitEvals`/`open(…, mask)`, `firstClaimPower`. | One documented test helper; add cheaters not yet covered: pointwise-H table, broken copy constraint (wrong permutation), wrong `z(ω·ζ)`, wrong public-input row, h pieces swapped. | Each cheater has a test with measured acceptance 0/N and the rejecting check recorded (lesson (e)). |
+| F5 | **Reconcile HK24's quotient-randomizer count** (87, eq. (9)) with ours (173) | We use 173 because we count the pair {x, −x} per FRI query; if HK24 is right with 87 we pay ~86 extra coefficients per piece — harmless, but the discrepancy means one of the two counts is misunderstood. | Re-read `2024-1037` Lemma 4 + Protocol 2 for how a FRI query's sibling point is counted; check against `TestRevealedValuesAreUniform` (it reports actual revealed points: 171 for h). | Written explanation in C.7; keep 173 unless the explanation is airtight. |
+
+### Cost
+| # | Follow-up | Why | Approach | Done when |
+|---|---|---|---|---|
+| F6 | **Proof size** (0.90 MB at 65k; KZG < 1 KB) | Size is the main practical cost of FRI-PLONK. | Merkle caps / shared upper path nodes across 86 queries; optional grinding (`2021-582` §3.11.3: ~20 bits of work saves ~13 queries); conjectured-regime 43 queries as an explicit opt-in (decided against as default). | Each option measured with `TestPerfRef` against the C.8 table; security impact written down. |
+| F7 | **Prover time** (2.1 s at 65k vs KZG 0.65 s) | Second practical cost. | Profile first (`go test -cpuprofile`); suspects: per-commitment coset FFTs at |D| = 16n, Merkle hashing (sequential sha256), evaluating at ζ by Horner. Parallelize hashing; reuse FFTs. | Profile recorded; each change measured. |
+| F8 | **Tiny circuits** (2 constraints → 0.43 MB, DegreeBound ≥ 512) | ZK blinding adds ~400 coefficients regardless of n (decision C7). Matters only if many tiny proofs are produced. | Accept unless a use case needs it; the revealed-point count (≤ 1 + 2·86) doesn't shrink with n, so the blinding can't either — only the domain could be sized more tightly. | Decision recorded with a use case, or closed as won't-fix. |
+
+### Research decisions to revisit
+| # | Follow-up | Why | Approach | Done when |
+|---|---|---|---|---|
+| F9 | **Post-quantum target** (decided: classical 128, "plausibly PQ") | ≈ 64 PQ bits today; sha256 caps PQ at ~85 bits. | Read [CMS19] (ePrint 2019/834), Chiesa–Yogev book, NIST PQC criteria §4.A.5, BHT97, Bernstein 2009; decide (a)/(b)/(c) of "Post-quantum target". | Decision + parameters (queries, hash, field) recorded. |
+
+### Later phases
+| # | Follow-up | Why | Approach | Done when |
+|---|---|---|---|---|
+| F10 | **Phase 3: in-circuit verifier** | Recursion / on-chain verification. The gadget (`std/commitments/fri`) still implements the pre-fix-A 1-query FRI; its test is gated (`fri_gadget_phase3`). | Port A–C to the gadget (86 queries, H(seed‖j) positions, DEEP batch, coset, mask), Poseidon2 instead of sha256/MiMC for in-circuit cost. | Gated test un-gated and green; native and in-circuit verifier agree on the same proofs. |
+| F11 | **Features:** BSB22 commitments (`api.Commit`), more curves | `commit`, `gkr_cube` circuits are skipped (`ErrCommitmentsUnsupported`); only bn254. | Commitments need an extra committed polynomial + transcript binding; curves are copy/codegen of `bn254`. | Suite runs those circuits; other curves pass the suite. |
+| F12 | **Housekeeping:** `internal/stats/generate/main.go` | Manual stats tool doesn't know `PLONKFRI` (noted in Phase 0; non-blocking, not part of tests). | Teach it plonkfri or skip it explicitly. | `go run ./internal/stats/generate` works. |
 
 ## Fix B design (B1) — approved 2026-10-07
 
@@ -530,3 +557,7 @@ Measured per-query acceptance of garbage = 1/8 = ρ, i.e. the conjectured regime
 - Final run: whole-repo build + every test package compiles; vet/gofmt clean; nativefri 10/10, suite 30/30 (+2 skipped), tiny 200, bn254 all green incl. attacks (0/800, 0/200), mask (0/50), leak (0/516), rank test (full rank).
 - Results table in "Fix C design" C.8; lessons (h)–(l) added to "Lessons that generalize"; next steps updated (Step 3 harness mostly exists; concurrency, tiny-circuit sizing, HK24 87-vs-173, external review added).
 - Status: plonkfri on bn254 is sound and (honest-verifier) zero-knowledge by construction, with tests for each mechanism; not externally reviewed.
+
+### 2026-10-07 (cont.) — follow-ups documented
+- New section "Follow-ups (after fixes A–C)": F1–F12 grouped as before-real-use (review, serialization, concurrency), robustness (malicious-prover harness, HK24 87-vs-173), cost (size, prover time, tiny circuits), research (PQ target), later phases (in-circuit verifier, features, housekeeping). Each with why / approach / "done when", so the next work can start test-first.
+- Branch `pq-pcs-followups` (stacked on PR #6, which was still open).
