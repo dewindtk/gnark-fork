@@ -28,6 +28,7 @@ Reference papers, all in `resources/` (committed):
 - **Milestone scope**: native (out-of-circuit) backend only. No in-circuit verifier / recursion in v1.
 - **Hash**: sha256 (matches the vendored `internal/nativefri` and old `backend/plonkfri` as-is). Poseidon2 swap deferred to when an in-circuit verifier is built.
 - **FRI security**: rate ρ=1/8 (`rho = 8`), **86 queries = 128-bit proven** soundness (Johnson bound). See "Security status".
+- **Security target** (decided 2026-10-07): **128-bit classical, "plausibly post-quantum"** — option (a) in "Post-quantum target" below; the industry norm (ethSTARK, Plonky2, RedShift). Quantum estimate ≈64 bits (Grover-type loss on Fiat-Shamir). Explicit PQ target (b)/(c) revisited after reading [CMS19] + NIST PQC criteria; it changes parameters (queries, hash, field), not the fix B/C design.
 
 ## Plan
 
@@ -164,24 +165,93 @@ A FRI-PLONK proof rests on two promises: (1) every committed table is a low-degr
 | 1 | FRI checked **1 query** per proof (`nbRounds = 1`) | FRI (`internal/nativefri`) — all 18 commitments | Garbage accepted ~1/8 → ~3 bits; e.g. a pointwise `H = F/Z_H` table passes PLONK at every `zeta`, only FRI could catch it | ✅ Fixed (A): fold once, **86 queries** = 128-bit proven (Johnson bound, ρ=1/8, `s = 2λ/log₂(1/ρ)`) |
 | 4 | `VerifyOpening` never tied `ClaimedValue` to the Merkle-authenticated leaf | FRI opening ↔ PLONK final check | Cheater claims any value at `zeta` (solve for `h`) → forgery with probability 1 | ✅ Fixed (A): `ErrClaimedValue` |
 | 2 | `zeta` drawn from the 16n-point FRI domain, not the whole field | PLONK final check (`prove.go`/`verify.go`) | Schwartz–Zippel escape up to ~19%; 1/16 of positions put `zeta` in the circuit domain (`Z_H(zeta)=0`) → honest low-degree polys for a witness breaking one gate pass ~1/16 | ❌ Open — fix **B**: sample `zeta ∈ F`, open via DEEP/RedShift quotient `(f(X)−f(z))/(X−z)` proven low-degree. Not fixable by any parameter. |
-| 3 | Blinding (2 coeffs L/R/O, 3 for Z) vs values revealed by queries + openings | PLONK prover blinding (`prove.go`) | Zero-knowledge (privacy) only, not soundness; with 86 queries it clearly leaks | ❌ Open — fix **C**: blinding degree ≥ number of revealed evaluations; depends on final query/opening design from B |
+| 3 | Blinding (2 coeffs L/R/O, 3 for Z) vs values revealed by queries + openings | PLONK prover blinding (`prove.go`) | Zero-knowledge (privacy) only, not soundness; with 86 queries it clearly leaks | ❌ Open — fix **C**: blinding degree ≥ number of revealed evaluations + a separate blinding polynomial in the FRI batch (Haböck §3.7); depends on final query/opening design from B |
+| 5 | FRI domain is a subgroup ⊇ circuit domain H (no coset shift) | FRI domain (`nativefri.newRadixTwoFri`) | ZK only: queries landing in H (1/16) reveal raw wire values, blinding vanishes there | ❌ Open — coset domain, as part of **B** (Haböck §3.7) |
+| 6 | Transcript doesn't bind the verifying key / circuit | Fiat-Shamir in `prove.go`/`verify.go` | "Weak Fiat-Shamir" class [DMWG23]; matters if the VK can be chosen adversarially | ❌ Open — bind VK digest first, as part of **B** |
 
 Parameter choice (decided 2026-10-07): **proven** 128-bit, not conjectured. Rationale: once FRI folds once, query count costs only proof size/verify time, not prover time (RedShift §6–7), and the proven regime keeps knowledge-soundness extractable. Conjectured alternative (43 queries, ~half the size) remains an opt-in for later. Sources: `resources/2020-654.pdf` §3.2/§8 (2λ/log(1/ρ) proven for q ≫ n²; λ/log(1/ρ) conjectured), `resources/2019-1400.pdf` Table 1, `resources/Revision2OfTR17-134.pdf` Thm 3.3 / Conj. 1.5.
 
 Lessons that generalize: (a) passing honest-proof tests says nothing about soundness — every check needs a test that a *cheating* prover is rejected; (b) any value the verifier uses must be bound to something it verified (here: `ClaimedValue` ↔ leaf, `ID` ↔ `Roots[0]`, layer sizes computed not trusted); (c) measure acceptance rates empirically — the 1/8 measurement exposed concern 1 before the theory did.
 
+## Literature basis for the security plan (checked 2026-10-07)
+
+Every planned protocol change maps to a specific, published construction in `resources/`. Engineering-only steps (Step 0, serialization, Merkle internals) need no paper.
+
+| Change | Source (in `resources/`) | What it says |
+|---|---|---|
+| Fix A: query count (done) | `2020-654` §3.2, §8 (Lemma 8.2, Conj. 8.4); `2019-1400` Table 1; `Revision2OfTR17-134` Thm 3.3 / Conj. 1.5 | s ≈ 2λ/log(1/ρ) proven for q ≫ n²; λ/log(1/ρ) conjectured |
+| Fix B: why in-domain `zeta` is weak | `2019-336` §6.3 (DEEP-ALI vs ALI) | ALI samples "at random locations from the evaluation domain" → distance bound stuck at 1/8; sampling `z` from the whole field fixes it ("DEEP": Domain Extension for Eliminating Pretenders) |
+| Fix B: `zeta ∈ F \ D` | `2019-1400` Algorithm 2, step 10 | "V sends P a random evaluation point y ∈ F\D" — also the step PLONK opens at (incl. `y·g` for the grand product) |
+| Fix B: proving `f(z)=v` with FRI | `2019-1400` §1.2.1 + Algorithm 1 (LPC); `2019-336` Protocol 6.4 step 6 (QUOTIENT) | q(X) = (f(X) − U(X)) / Π(X − zᵢ), FRI on q with degree d − N; verifier simulates q from f's oracle (no extra commitment); correctness by Bézout |
+| Fix B: batching all openings into one FRI | `2019-1400` §8.1 + Appendix G (Batched FRI, Thm 8 / Cor. 1); `2020-654` §8 "Batching" + Lemma 8.2 | FRI on Σ αⁱ⁻¹ fᵢ with verifier-chosen α; batched soundness error bounded via correlated agreement |
+| Fix B: binding for *setup* polys | `2019-1400` §4.3 (PES, Defs. 11–12, Thm 5) | Beyond the unique-decoding radius a Merkle root can be close to several polynomials (a *list*); witness polys only need existence, but setup polys need uniqueness → add "distinguishing" evaluation points fixed at setup. **Design decision to make in B1.** |
+| Fix C: blinding degree | `2019-1400` Appendix D.3 (ZK proof), §5 remark | Mask `Z(X)·Hᵢ(X)` with deg Hᵢ ≥ \|Kᵢ\| = number of points where fᵢ is revealed; sampling y outside D gives *perfect* ZK |
+| Fiat-Shamir safety of the whole thing | `2019-1400` Thm 7 (round-by-round knowledge soundness) | RBR soundness is what makes the non-interactive (hashed) version sound |
+
+Added to `resources/` 2026-10-07: `2021-582` (ethSTARK Documentation v1.2), `2022-1216` (Haböck, A summary on the FRI low degree test, Dec 2024 rev.), `2023-1071` (Block et al., Fiat-Shamir Security of FRI and Related SNARKs).
+
+| Change / question | Source | What it says |
+|---|---|---|
+| Fix B protocol as a whole | `2023-1071` §2.4 (OPlonky), §6–7 | Our post-B design (zeta ∈ F, one batched FRI over `(f(X)−f(z))/(X−z)`) is their "OPlonky" ≈ Plonky2; they prove RBR (knowledge) soundness → FS-secure. Non-FRI error terms (`rn/|F|`, `(k+s)/|F|`, `deg·n/|F|`) negligible in bn254. |
+| FS security of (batched) FRI | `2023-1071` Cor. 4.3/4.4; `2021-582` Def. 9, Claim 1, Thm 7 | `ε_fs = Q·ε_rbr + 3(Q²+1)/2^κ` for a Q-hash attacker; "λ bits" ⇔ `ε_rbr ≤ 2^-λ` and digest ≥ 2λ (sha256 OK for 128). |
+| Exact query count | `2022-1216` Thm 2 (= BCIKS20 Thm 8.3), §3.5; `2021-582` §5.10.2 | Error = `ε_C + (√ρ(1+1/2m))^s`. Recomputed for bn254 (|F|≈2^253.6), ρ=1/8: **s=86 gives ≈128.8–129 bits** (m≈40+); strict half/half split → 87. 86 stands. |
+| Batching w/ different degree bounds | `2022-1216` §1 | "degree correction factors … are not needed for the DEEP method." |
+| Grinding (optional) | `2021-582` §3.11.3, §6.3 Thm 6 | Proof-of-work nonce before queries multiplies the query-round error by 2^-z; e.g. z=20 saves ~13 queries. |
+
+### Additional considerations found (not previously in the plan)
+
+1. **ZK leak via the FRI domain (`2022-1216` §3.7).** FRI must run on a coset `a·D` disjoint from the circuit domain H. Ours is a plain subgroup (`fft.NewDomain`) ⊇ H, and blinding `Z_H·(…)` vanishes on H → each query landing in H (1 in 16) reveals raw wire values; ~10 per witness polynomial per proof at 86 queries. Fix: coset FRI domain. Also required by fix B (quotient `1/(x−zeta)` and `zeta ∉ D ∪ H`). → fold into **B**.
+2. **ZK of the FRI folding oracles (`2022-1216` §3.7, ref. [HK24]).** "crucial to add a separate blinding polynomial h(x) to the batch". Masking the inputs (RedShift D.3) is not sufficient alone. → part of **C**. Reference to fetch: Haböck & Al Kindi, *A note on adding zero-knowledge to STARKs* (ePrint 2024/1037 — verify).
+3. **Weak Fiat-Shamir (`2023-1071` ref. [DMWG23]).** Transcript binds public inputs + proof roots but **not the verifying key** (selector/permutation/id roots) or circuit. Standard hardening: bind a VK digest first. → add to **B**. Reference to fetch: Dao, Miller, Wright, Grubbs, *Weak Fiat-Shamir Attacks on Modern Proof Systems* (IEEE S&P 2023; ePrint 2023/691 — verify).
+4. **Post-quantum security level is ~half the classical one (`2023-1071` Cor. 4.3/4.4).** Quantum adversary: error `Θ(Q²·ε_rbr)` → 128 classical bits ≈ 64 PQ bits. 128-bit PQ would need ~172 proven queries, and the commit-phase term `~|D|²/|F|` in a 254-bit field caps *proven* PQ security near ~100 bits for |D|≈2^20 (would need an extension field / bigger field beyond that). **Decision needed: state the target as classical bits (industry norm) or set a PQ target.**
+5. **Setup-polynomial binding (RedShift §4.3 PES)** — likely moot for us: setup is deterministic and the VK roots are re-derivable from the circuit, so committed setup words are exact codewords; distinct codewords are ≥ 1−ρ = 0.875 apart > δ ≤ 1−√ρ ≈ 0.646, so no other polynomial is δ-close. Confirm in B1; only relevant if an untrusted party ever produces the VK.
+6. **Query sampling** `H(seed‖j) mod |D|` with |D| a power of two is unbiased; sampling with replacement matches the analysis. No change.
+
+### Post-quantum target — what the literature gives us (checked 2026-10-07)
+
+Only `2023-1071` (Block et al.) states quantum bounds; every other paper says "plausibly post-quantum" and cites **[CMS19]** (Chiesa–Manohar–Spooner, *Succinct Arguments in the Quantum Random Oracle Model*, TCC 2019) for the underlying theorem. `2023-1071` Thm 3.15 (from [BCS16, CMS19, COS20]):
+- classical: `ε_fs = Q·ε_rbr + 3(Q²+1)/2^κ`
+- quantum: `ε_qfs = Θ(Q·ε_fs) = Θ(Q²·ε_rbr + Q³/2^κ)` (κ = hash digest bits)
+
+Consequences for us (bn254 fr, sha256):
+1. **Protocol term** `Q²·ε_rbr`: λ_q PQ bits need `ε_rbr ≤ ~2^-2λ_q` → 128 classical bits (86 queries) ≈ **64 PQ bits**; 128 PQ bits ≈ 172 proven queries. This matches the generic Grover attack on Fiat-Shamir (search for a lucky transcript in ~√(1/ε) quantum queries), so the square-root loss is essentially inherent, not a proof artifact.
+2. **Hash term** `Q³/2^κ`: λ_q needs `κ ≥ ~3λ_q` → **sha256 caps PQ security at ~85 bits** (128 PQ would need a 384-bit digest). This is the Brassard–Høyer–Tapp 2^(κ/3) collision bound; whether that is the right *cost* model is disputed (Bernstein 2009 argues quantum collision search is not cheaper than classical in realistic hardware) — NIST's PQC criteria rate SHA-256 collision as Category 2.
+3. **Commit-phase term** `~|D|²/|F|` in a 254-bit field caps *proven* PQ soundness near ~100 bits for |D|≈2^20.
+4. Θ hides constants; the bounds are asymptotic → treat PQ numbers as estimates.
+→ Realistic options: (a) state classical 128 bits and "plausibly PQ" (industry norm: ethSTARK, Plonky2, RedShift all do this); (b) target an explicit PQ level ≤ ~85 bits with sha256 + ~2× queries; (c) for ≥128 PQ: 384-bit hash, ~172+ queries, and likely an extension field.
+Sources to obtain/verify (not yet in `resources/`, IDs from memory): [CMS19] ePrint 2019/834; Chiesa & Yogev, *Building Cryptographic Proofs from Hash Functions* (2024 book, free online; full BCS/QROM treatment); NIST PQC *Submission Requirements and Evaluation Criteria* (2016) §4.A.5 (security categories); Brassard–Høyer–Tapp 1997 (*Quantum cryptanalysis of hash and claw-free functions*); Bernstein 2009 (*Cost analysis of hash collisions: will quantum computers make SHARCS obsolete?*).
+
+### Findings from `2023-691` (weak F-S) and `2024-1037` (HK24, ZK for STARKs)
+- **Strong F-S** (`2023-691` Def. 3): `cᵢ = H(pp, x, a₁…aᵢ)` — public parameters (for PLONK: the preprocessed/index polynomials = our VK) **and** public inputs **and** all prover messages. Their Plonk attack exploits unbound *public inputs*; we do bind public inputs (not vulnerable to that attack), but not `pp`/VK → consideration 3 stands (bind VK digest first). Their mitigation advice: declare all transcript inputs up front and fail if any is missing.
+- **ZK opening protocol** (`2024-1037` Protocol 2): openings at `z ∈ F \ (D ∪ H)` + a separate mask polynomial `R(X)` in the batch; without `R` each FRI fold halves the randomizer space → leaks (confirms considerations 1–2).
+- **Quotient split** (`2024-1037` §1, §4): our `h1,h2,h3` monomial split is randomizable, but the pieces must be randomized too → part of fix C.
+- **Permutation argument** (`2024-1037` App. A): the grand product reveals "challenge ≠ any witness value"; negligible for *statistical* ZK in a 254-bit field with one challenge; perfect ZK needs extra modifications (optional).
+
 ## Open questions / next steps
 
-- [x] Phase 0: restore `backend/plonkfri/bn254` from `1ed22f78^`, repoint import to `internal/nativefri`.
-- [x] Phase 1: API drift check — none needed; plain-gate circuits work.
-- [x] Phase 2: shared circuit suite passes (30/30 in scope) after the 2026-10-07 fixes.
-- [x] Security fix A: multi-query FRI (86 queries, proven 128-bit) + opening/ID binding fixes.
-- [ ] **Security fix B (next, blocks everything else)**: out-of-domain `zeta` via DEEP/RedShift quotient — see "Security status".
-- [ ] Security fix C: blinding degree vs revealed evaluations (after B).
-- [ ] Phase 3 prerequisite: the in-circuit FRI gadget `std/commitments/fri` (from PR #2, `restore-fri-gadget`) still has `const nbRounds = 1` — the same 1-query weakness fix A removed natively. It is unused today; port the fix-A structure (one commit phase, 86 queries, root/ID binding) before using it for recursion.
-- [ ] Cheap wins: verify the 11 fixed VK proximity proofs once at setup instead of on every Verify (~60% of verify time); Merkle path de-duplication across queries (proof size).
-- [ ] Decide post-v1 direction: batched openings (prover is ~10–14× slower than KZG), more curves, or in-circuit verifier.
-- [ ] Read `computeQuotientCanonical`'s coset-FFT trick and the `pk.Permutation[i]` bookkeeping in `computeBlindedZCanonical` in full (not yet done).
+Done: Phase 0–2 (restore, compile, shared circuit suite 30/30); security fix A (86-query FRI, opening/ID binding) — PRs #1–#3 merged 2026-10-07.
+
+**Step 0 — `master` is red (do first, small).** `std/commitments/fri/fri_test.go` (in-circuit gadget, PR #2) builds native proofs with `nativefri` and no longer compiles after fix A changed the proof format (`Rounds` → `Roots`/`Queries`). Library and native tests are fine. Missed at PR #2 resolution because only textual conflicts were checked, not compilation of the merged result — always `go vet`/`go test` the *combined* tree. Options: (a) port fix A into the gadget now (in-circuit: one commit phase, s queries, H(seed‖j) positions in MiMC, root/ID binding) — real work but needed for Phase 3 anyway; (b) stopgap: gate the test out with a build tag + TODO until Phase 3.
+
+**Step 1 — Fix B: out-of-domain `zeta` (DEEP / RedShift LPC). Blocks "sound".**
+- B1 design: read RedShift §4 (LPC) + DEEP-FRI §5 + Block et al. §2.4/§7 (OPlonky) + Haböck §4–5; write the design here before coding. Includes: **coset FRI domain** (consideration 1), **VK digest bound first in the transcript** (consideration 3), setup-binding check (consideration 5).
+- Core idea: `zeta` ∈ F (whole field, as in KZG PLONK). To prove `f(zeta)=v`, show `q(X)=(f(X)−v)/(X−zeta)` is low-degree with FRI. q needs no commitment: the verifier computes q's value at any FRI query point x from the opened f(x). All openings combine with random coefficients into **one** FRI proof: `Σ αⁱ (fᵢ(X)−vᵢ)/(X−zeta)` (+ terms at `zeta·ω` for Z) → batching comes almost for free (18 proximity proofs → 1).
+- Consequences: commitments become plain Merkle roots; VK stores roots, not 11 proximity proofs (verify gets cheaper); `nativefri` gains `Commit` + `BatchOpen`/`VerifyBatchOpen`; prove/verify rewired.
+- B2 nativefri API + tests (incl. cheating cases). B3 rewire prove/verify. B4 adversarial tests for concern 2 (single-bad-gate witness, pointwise-H table) — must be rejected.
+- Before B3: read the two still-unread prover functions (`computeQuotientCanonical`, permutation bookkeeping in `computeBlindedZCanonical`), since B rewires around them.
+
+**Step 2 — Fix C: blinding vs revealed evaluations (zero-knowledge).** Also add a separate random blinding polynomial to the FRI batch (consideration 2, [HK24]). After B the exact count is known: each committed poly is revealed at ~2·86 FRI positions + its `zeta` openings → blinding degree must be ≥ that; FRI degree bound/domain sizing must absorb it. RedShift samples outside D for perfect ZK — check §6.
+
+**Decided — security target (consideration 4):** option (a), classical 128 bits + "plausibly PQ" (see Design decisions). To revisit: explicit PQ target after reading [CMS19] / Chiesa–Yogev / NIST PQC criteria; optional grinding to trade queries for prover work.
+
+**Step 3 — Malicious-prover test harness.** A reusable way to build deliberately bad proofs (lying openings, pointwise-H, bad-gate witness) so every soundness claim has a test that a cheater fails. Partly built during B4.
+
+**After "sound + ZK"** (pick by priority):
+- Proof serialization (`WriteTo`/`ReadFrom`) — none exists; needed for any real use.
+- Size/speed: Merkle path dedup / caps, parallel hashing.
+- Phase 3: port fix A/B to the in-circuit gadget, Poseidon2, recursive verifier.
+- Features: BSB22 commitments, more curves.
+- Housekeeping: `playground_test.go` (keep/delete?), `internal/stats/generate/main.go`.
 
 ## Session Log
 
@@ -244,3 +314,10 @@ Measured per-query acceptance of garbage = 1/8 = ρ, i.e. the conjectured regime
 - Tests (`internal/nativefri/fri_test.go`): Merkle-path equivalence with gnark-crypto, completeness, soundness (0/600 far words accepted vs ~1/8 before), tampering cases, opening-lie. Full plonkfri suite still 30/30 + 2 skipped.
 - Perf (bn254 refCircuit, before → after): 4094 constraints setup 550→260ms, prove 534→383ms, verify 0.6→39ms; 65534: setup 8.3→4.1s, prove 9.2→6.8s, verify 1.0→69ms. Proof's 7 proximity proofs ≈ 3.2MB / 4.8MB. Verify cost is 18 proximity proofs × 86 chains; the 11 VK proofs are fixed and could be checked once at setup (cheap later win). Size is the next driver for batching + Merkle path dedup.
 - Still open: fix B (out-of-domain zeta — currently caps soundness at ~4 bits), fix C (blinding vs 86×revealed evaluations — ZK now clearly insufficient).
+
+### 2026-10-07 (cont.) — literature review + security target
+- Checked the security plan against the papers in `resources/` (FRI/ethSTARK, DEEP-FRI, RedShift, `2021-582`, `2022-1216`, `2023-1071` Block et al., `2023-691` weak F-S, `2024-1037` HK24). Fix B/C designs confirmed and extended: coset FRI domain, VK digest in the transcript, separate mask polynomial R(X), randomized quotient pieces. See "Literature basis", "Additional considerations", "Findings from 2023-691 / 2024-1037".
+- PQ analysis (only `2023-1071` Thm 3.15 gives quantum bounds): 128 classical ≈ 64 PQ bits; sha256 caps PQ at ~85 bits; bn254 fr caps proven PQ near ~100 bits.
+- **Decided: security target (a)** — 128-bit classical, "plausibly PQ".
+- To obtain/verify: [CMS19] ePrint 2019/834, Chiesa–Yogev book, NIST PQC criteria §4.A.5, BHT97, Bernstein 2009.
+- Next: Step 0 (master red: gadget `fri_test.go`), then fix B (B1 design first).
