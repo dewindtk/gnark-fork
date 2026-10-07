@@ -30,8 +30,7 @@ func (c *squareMulCircuit) Define(api frontend.API) error {
 
 // TestSetupSmoke is a Phase 0 smoke test: it only checks that Setup runs to
 // completion against today's constraint/bn254 and produces structurally
-// sane keys. It does not prove or verify anything yet -- prove.go/verify.go
-// don't exist on this branch yet.
+// sane keys.
 func TestSetupSmoke(t *testing.T) {
 	assert := require.New(t)
 
@@ -60,15 +59,8 @@ func TestSetupSmoke(t *testing.T) {
 	// the permutation must cover all 3*size wire slots (l||r||o).
 	assert.Len(pk.Permutation, 3*int(vk.Size))
 
-	// every setup polynomial must have actually gone through FRI's
-	// BuildProofOfProximity -- a real proof has at least one folding round.
-	for i, pp := range vk.Qpp {
-		assert.NotEmpty(pp.Queries, "Qpp[%d] has no queries -- selector polynomial was not committed", i)
-	}
-	for i, pp := range vk.Spp {
-		assert.NotEmpty(pp.Queries, "Spp[%d] has no queries -- permutation polynomial was not committed", i)
-	}
-	for i, pp := range vk.Idpp {
-		assert.NotEmpty(pp.Queries, "Idpp[%d] has no queries -- identity polynomial was not committed", i)
-	}
+	// the 8 preprocessed polynomials are committed in one Merkle tree.
+	assert.NotEmpty(vk.Pre.Root, "preprocessed polynomials were not committed")
+	assert.Equal(8, vk.Pre.NbPolys)
+	assert.True(vk.DegreeBound >= vk.Size+3, "degree bound %d too small for the blinded Z", vk.DegreeBound)
 }

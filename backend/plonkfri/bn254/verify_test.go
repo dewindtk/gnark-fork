@@ -40,12 +40,9 @@ func TestRoundTrip(t *testing.T) {
 	err = plonkfri.Verify(proof, vk, publicVector)
 	assert.NoError(err, "a valid proof must verify")
 
-	// negative test: tamper with a claimed opening value and confirm Verify rejects it.
+	// negative test: tamper with a claimed evaluation and confirm Verify rejects it.
 	tampered := *proof
-	tampered.OpeningsLROmp[0].ClaimedValue.Add(
-		&tampered.OpeningsLROmp[0].ClaimedValue,
-		&tampered.OpeningsLROmp[0].ClaimedValue,
-	) // double it -- guaranteed different from the original since X=3 makes it nonzero
+	tampered.Evals.L.Add(&tampered.Evals.L, &tampered.Evals.L) // double it -- l(zeta) is nonzero w.h.p.
 
 	err = plonkfri.Verify(&tampered, vk, publicVector)
 	assert.Error(err, "a tampered proof must NOT verify")

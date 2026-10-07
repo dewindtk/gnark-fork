@@ -20,7 +20,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
-	fiatshamir "github.com/consensys/gnark-crypto/fiat-shamir"
 	"github.com/consensys/gnark/backend"
 	"github.com/consensys/gnark/internal/nativefri"
 	"math/big"
@@ -39,314 +38,44 @@ func Verify(proof *Proof, vk *VerifyingKey, publicWitness fr.Vector, opts ...bac
 	if len(publicWitness) != int(vk.NbPublicVariables) {
 		return errInvalidWitness
 	}
-
-	// 0 - derive the challenges with Fiat Shamir
-	fs := fiatshamir.NewTranscript(cfg.ChallengeHash, "gamma", "beta", "alpha", "zeta")
-
-	dataFiatShamir := make([][fr.Bytes]byte, len(publicWitness)+3)
-	for i := 0; i < len(publicWitness); i++ {
-		copy(dataFiatShamir[i][:], publicWitness[i].Marshal())
+	if proof == nil || proof.Opening == nil {
+		return nativefri.ErrMalformedProof
 	}
-	copy(dataFiatShamir[len(publicWitness)][:], proof.LROpp[0].ID)
-	copy(dataFiatShamir[len(publicWitness)+1][:], proof.LROpp[1].ID)
-	copy(dataFiatShamir[len(publicWitness)+2][:], proof.LROpp[2].ID)
 
-	beta, err := deriveRandomnessFixedSize(fs, "gamma", dataFiatShamir...)
+	// 0 - replay the Fiat-Shamir transcript
+	fs := newTranscript(cfg.ChallengeHash, vk, publicWitness)
+	beta, gamma, err := fs.afterLRO(proof.LRO)
 	if err != nil {
 		return err
 	}
-
-	gamma, err := deriveRandomness(fs, "beta", nil)
+	alpha, err := fs.afterZ(proof.Z)
+	if err != nil {
+		return err
+	}
+	zeta, seed, err := fs.afterH(proof.H)
 	if err != nil {
 		return err
 	}
 
-	alpha, err := deriveRandomness(fs, "alpha", proof.Zpp.ID)
-	if err != nil {
+	// 1 - the claimed evaluations are those of the committed polynomials, all of
+	// which are low-degree (one batched DEEP-FRI opening)
+	if err := vk.Fri.Verify(seed, proof.commitments(vk), proof.claims(vk, zeta), proof.Opening); err != nil {
 		return err
 	}
 
-	// compute the size of the domain of evaluation of the committed polynomial,
-	// the opening position. The challenge zeta will be g^{i} where i is the opening
-	// position, and g is the generator of the fri domain.
-	rho := uint64(nativefri.GetRho())
-	friSize := 2 * rho * vk.Size
-	var bFriSize big.Int
-	bFriSize.SetInt64(int64(friSize))
-	frOpeningPosition, err := deriveRandomness(fs, "zeta", proof.Hpp[0].ID, proof.Hpp[1].ID, proof.Hpp[2].ID)
-	if err != nil {
-		return err
-	}
-	var bOpeningPosition big.Int
-	bOpeningPosition.SetBytes(frOpeningPosition.Marshal()).Mod(&bOpeningPosition, &bFriSize)
-	openingPosition := bOpeningPosition.Uint64()
-
-	shiftedOpeningPosition := (openingPosition + uint64(2*rho)) % friSize
-	err = vk.Iopp.VerifyOpening(shiftedOpeningPosition, proof.OpeningsZmp[1], proof.Zpp)
-	if err != nil {
-		return err
-	}
-
-	// 1 - verify that the commitments are low degree polynomials
-
-	// ql, qr, qm, qo, qkIncomplete
-	err = vk.Iopp.VerifyProofOfProximity(vk.Qpp[0])
-	if err != nil {
-		return err
-	}
-	err = vk.Iopp.VerifyProofOfProximity(vk.Qpp[1])
-	if err != nil {
-		return err
-	}
-	err = vk.Iopp.VerifyProofOfProximity(vk.Qpp[2])
-	if err != nil {
-		return err
-	}
-	err = vk.Iopp.VerifyProofOfProximity(vk.Qpp[3])
-	if err != nil {
-		return err
-	}
-	err = vk.Iopp.VerifyProofOfProximity(vk.Qpp[4])
-	if err != nil {
-		return err
-	}
-
-	// l, r, o
-	err = vk.Iopp.VerifyProofOfProximity(proof.LROpp[0])
-	if err != nil {
-		return err
-	}
-	err = vk.Iopp.VerifyProofOfProximity(proof.LROpp[1])
-	if err != nil {
-		return err
-	}
-	err = vk.Iopp.VerifyProofOfProximity(proof.LROpp[2])
-	if err != nil {
-		return err
-	}
-	err = vk.Iopp.VerifyProofOfProximity(proof.Zpp)
-	if err != nil {
-		return err
-	}
-
-	// h0, h1, h2
-	err = vk.Iopp.VerifyProofOfProximity(proof.Hpp[0])
-	if err != nil {
-		return err
-	}
-	err = vk.Iopp.VerifyProofOfProximity(proof.Hpp[1])
-	if err != nil {
-		return err
-	}
-	err = vk.Iopp.VerifyProofOfProximity(proof.Hpp[2])
-	if err != nil {
-		return err
-	}
-
-	// s1, s2, s3
-	err = vk.Iopp.VerifyProofOfProximity(vk.Spp[0])
-	if err != nil {
-		return err
-	}
-	err = vk.Iopp.VerifyProofOfProximity(vk.Spp[1])
-	if err != nil {
-		return err
-	}
-	err = vk.Iopp.VerifyProofOfProximity(vk.Spp[2])
-	if err != nil {
-		return err
-	}
-
-	// id1, id2, id3
-	err = vk.Iopp.VerifyProofOfProximity(vk.Idpp[0])
-	if err != nil {
-		return err
-	}
-	err = vk.Iopp.VerifyProofOfProximity(vk.Idpp[1])
-	if err != nil {
-		return err
-	}
-	err = vk.Iopp.VerifyProofOfProximity(vk.Idpp[2])
-	if err != nil {
-		return err
-	}
-
-	// Z
-	err = vk.Iopp.VerifyProofOfProximity(proof.Zpp)
-	if err != nil {
-		return err
-	}
-
-	// 2 - verify the openings
-
-	// ql, qr, qm, qo, qkIncomplete
-	// openingPosition := uint64(2)
-	err = vk.Iopp.VerifyOpening(openingPosition, proof.OpeningsQlQrQmQoQkincompletemp[0], vk.Qpp[0])
-	if err != nil {
-		return err
-	}
-	err = vk.Iopp.VerifyOpening(openingPosition, proof.OpeningsQlQrQmQoQkincompletemp[1], vk.Qpp[1])
-	if err != nil {
-		return err
-	}
-	err = vk.Iopp.VerifyOpening(openingPosition, proof.OpeningsQlQrQmQoQkincompletemp[2], vk.Qpp[2])
-	if err != nil {
-		return err
-	}
-	err = vk.Iopp.VerifyOpening(openingPosition, proof.OpeningsQlQrQmQoQkincompletemp[3], vk.Qpp[3])
-	if err != nil {
-		return err
-	}
-	err = vk.Iopp.VerifyOpening(openingPosition, proof.OpeningsQlQrQmQoQkincompletemp[4], vk.Qpp[4])
-	if err != nil {
-		return err
-	}
-
-	// l, r, o
-	err = vk.Iopp.VerifyOpening(openingPosition, proof.OpeningsLROmp[0], proof.LROpp[0])
-	if err != nil {
-		return err
-	}
-	err = vk.Iopp.VerifyOpening(openingPosition, proof.OpeningsLROmp[1], proof.LROpp[1])
-	if err != nil {
-		return err
-	}
-	err = vk.Iopp.VerifyOpening(openingPosition, proof.OpeningsLROmp[2], proof.LROpp[2])
-	if err != nil {
-		return err
-	}
-
-	// h0, h1, h2
-	err = vk.Iopp.VerifyOpening(openingPosition, proof.OpeningsHmp[0], proof.Hpp[0])
-	if err != nil {
-		return err
-	}
-	err = vk.Iopp.VerifyOpening(openingPosition, proof.OpeningsHmp[1], proof.Hpp[1])
-	if err != nil {
-		return err
-	}
-	err = vk.Iopp.VerifyOpening(openingPosition, proof.OpeningsHmp[2], proof.Hpp[2])
-	if err != nil {
-		return err
-	}
-
-	// s0, s1, s2
-	err = vk.Iopp.VerifyOpening(openingPosition, proof.OpeningsS1S2S3mp[0], vk.Spp[0])
-	if err != nil {
-		return err
-	}
-	err = vk.Iopp.VerifyOpening(openingPosition, proof.OpeningsS1S2S3mp[1], vk.Spp[1])
-	if err != nil {
-		return err
-	}
-	err = vk.Iopp.VerifyOpening(openingPosition, proof.OpeningsS1S2S3mp[2], vk.Spp[2])
-	if err != nil {
-		return err
-	}
-
-	// id0, id1, id2
-	err = vk.Iopp.VerifyOpening(openingPosition, proof.OpeningsId1Id2Id3mp[0], vk.Idpp[0])
-	if err != nil {
-		return err
-	}
-	err = vk.Iopp.VerifyOpening(openingPosition, proof.OpeningsId1Id2Id3mp[1], vk.Idpp[1])
-	if err != nil {
-		return err
-	}
-	err = vk.Iopp.VerifyOpening(openingPosition, proof.OpeningsId1Id2Id3mp[2], vk.Idpp[2])
-	if err != nil {
-		return err
-	}
-
-	// Z, Zshift
-	err = vk.Iopp.VerifyOpening(openingPosition, proof.OpeningsZmp[0], proof.Zpp)
-	if err != nil {
-		return err
-	}
-
-	// verification of the algebraic relation
-	var ql, qr, qm, qo, qk fr.Element
-	ql.Set(&proof.OpeningsQlQrQmQoQkincompletemp[0].ClaimedValue)
-	qr.Set(&proof.OpeningsQlQrQmQoQkincompletemp[1].ClaimedValue)
-	qm.Set(&proof.OpeningsQlQrQmQoQkincompletemp[2].ClaimedValue)
-	qo.Set(&proof.OpeningsQlQrQmQoQkincompletemp[3].ClaimedValue)
-	qk.Set(&proof.OpeningsQlQrQmQoQkincompletemp[4].ClaimedValue) // -> to be completed
-
-	var l, r, o fr.Element
-	l.Set(&proof.OpeningsLROmp[0].ClaimedValue)
-	r.Set(&proof.OpeningsLROmp[1].ClaimedValue)
-	o.Set(&proof.OpeningsLROmp[2].ClaimedValue)
-
-	var h1, h2, h3 fr.Element
-	h1.Set(&proof.OpeningsHmp[0].ClaimedValue)
-	h2.Set(&proof.OpeningsHmp[1].ClaimedValue)
-	h3.Set(&proof.OpeningsHmp[2].ClaimedValue)
-
-	var s1, s2, s3 fr.Element
-	s1.Set(&proof.OpeningsS1S2S3mp[0].ClaimedValue)
-	s2.Set(&proof.OpeningsS1S2S3mp[1].ClaimedValue)
-	s3.Set(&proof.OpeningsS1S2S3mp[2].ClaimedValue)
-
-	var id1, id2, id3 fr.Element
-	id1.Set(&proof.OpeningsId1Id2Id3mp[0].ClaimedValue)
-	id2.Set(&proof.OpeningsId1Id2Id3mp[1].ClaimedValue)
-	id3.Set(&proof.OpeningsId1Id2Id3mp[2].ClaimedValue)
-
-	var z, zshift fr.Element
-	z.Set(&proof.OpeningsZmp[0].ClaimedValue)
-	zshift.Set(&proof.OpeningsZmp[1].ClaimedValue)
-
-	// 2 - compute the LHS: (ql*l+..+qk)+ α*(z(μx)*(l+β*s₁+γ)*..-z*(l+β*id1+γ))+α²*z*(l1-1)
-	var zeta fr.Element
-	zeta.Exp(vk.GenOpening, &bOpeningPosition)
-
-	var lhs, t1, t2, t3, tmp, tmp2 fr.Element
-	// 2.1 (ql*l+..+qk)
-	t1.Mul(&l, &ql)
-	tmp.Mul(&r, &qr)
-	t1.Add(&t1, &tmp)
-	tmp.Mul(&qm, &l).Mul(&tmp, &r)
-	t1.Add(&t1, &tmp)
-	tmp.Mul(&o, &qo)
-	t1.Add(&tmp, &t1)
-	tmp = completeQk(publicWitness, vk, zeta)
-	tmp.Add(&qk, &tmp)
-	t1.Add(&tmp, &t1)
-
-	// 2.2 (z(ux)*(l+β*s1+γ)*..-z*(l+β*id1+γ))
-	t2.Mul(&beta, &s1).Add(&t2, &l).Add(&t2, &gamma)
-	tmp.Mul(&beta, &s2).Add(&tmp, &r).Add(&tmp, &gamma)
-	t2.Mul(&tmp, &t2)
-	tmp.Mul(&beta, &s3).Add(&tmp, &o).Add(&tmp, &gamma)
-	t2.Mul(&tmp, &t2).Mul(&t2, &zshift)
-
-	tmp.Mul(&beta, &id1).Add(&tmp, &l).Add(&tmp, &gamma)
-	tmp2.Mul(&beta, &id2).Add(&tmp2, &r).Add(&tmp2, &gamma)
-	tmp.Mul(&tmp, &tmp2)
-	tmp2.Mul(&beta, &id3).Add(&tmp2, &o).Add(&tmp2, &gamma)
-	tmp.Mul(&tmp2, &tmp).Mul(&tmp, &z)
-
-	t2.Sub(&t2, &tmp)
-
-	// 2.3 (z-1)*l1
-	var one fr.Element
+	// 2 - the PLONK identity holds at zeta
+	lhs := identityLHS(vk, &proof.Evals, proof.ZShifted, publicWitness, beta, gamma, alpha, zeta)
+	e := &proof.Evals
+	var tmp, one fr.Element
 	one.SetOne()
-	t3.Exp(zeta, big.NewInt(int64(vk.Size))).Sub(&t3, &one)
-	tmp.Sub(&zeta, &one).Inverse(&tmp).Mul(&tmp, &vk.SizeInv)
-	t3.Mul(&tmp, &t3)
-	tmp.Sub(&z, &one)
-	t3.Mul(&tmp, &t3)
 
-	// 2.4 (ql*l+s+qk) + α*(z(ux)*(l+β*s1+γ)*...-z*(l+β*id1+γ)..)+ α²*z*(l1-1)
-	lhs.Set(&t3).Mul(&lhs, &alpha).Add(&lhs, &t2).Mul(&lhs, &alpha).Add(&lhs, &t1)
-
-	// 3 - compute the RHS
+	// 3 - the RHS: (h1 + ζ^{n+2}·h2 + ζ^{2(n+2)}·h3)·(ζⁿ-1)
 	var rhs fr.Element
 	tmp.Exp(zeta, big.NewInt(int64(vk.Size+2)))
-	rhs.Mul(&h3, &tmp).
-		Add(&rhs, &h2).
+	rhs.Mul(&e.H3, &tmp).
+		Add(&rhs, &e.H2).
 		Mul(&rhs, &tmp).
-		Add(&rhs, &h1)
+		Add(&rhs, &e.H1)
 
 	tmp.Exp(zeta, big.NewInt(int64(vk.Size))).Sub(&tmp, &one)
 	rhs.Mul(&rhs, &tmp)
@@ -358,6 +87,65 @@ func Verify(proof *Proof, vk *VerifyingKey, publicWitness fr.Vector, opts ...bac
 
 	return nil
 
+}
+
+// identityLHS evaluates the left-hand side of the PLONK identity at zeta,
+//
+//	(ql·l + qr·r + qm·l·r + qo·o + qk + PI) + α·(permutation) + α²·L₁·(z − 1),
+//
+// from the claimed evaluations. The identity holds iff it equals
+// h(zeta)·Z_H(zeta).
+func identityLHS(vk *VerifyingKey, evals *Evaluations, zShifted fr.Element, publicWitness fr.Vector, beta, gamma, alpha, zeta fr.Element) fr.Element {
+	e := evals
+	l, r, o := e.L, e.R, e.O
+
+	// identity permutation: Id_k(X) = u^k·X (see getIDSmallDomain)
+	var id1, id2, id3 fr.Element
+	id1.Set(&zeta)
+	id2.Mul(&zeta, &vk.CosetShift)
+	id3.Mul(&id2, &vk.CosetShift)
+
+	// 2.1 (ql*l+..+qk)
+	var lhs, t1, t2, t3, tmp, tmp2 fr.Element
+	t1.Mul(&l, &e.Ql)
+	tmp.Mul(&r, &e.Qr)
+	t1.Add(&t1, &tmp)
+	tmp.Mul(&e.Qm, &l).Mul(&tmp, &r)
+	t1.Add(&t1, &tmp)
+	tmp.Mul(&o, &e.Qo)
+	t1.Add(&tmp, &t1)
+	tmp = completeQk(publicWitness, vk, zeta)
+	tmp.Add(&e.Qk, &tmp)
+	t1.Add(&tmp, &t1)
+
+	// 2.2 (z(ux)*(l+β*s1+γ)*..-z*(l+β*id1+γ))
+	t2.Mul(&beta, &e.S1).Add(&t2, &l).Add(&t2, &gamma)
+	tmp.Mul(&beta, &e.S2).Add(&tmp, &r).Add(&tmp, &gamma)
+	t2.Mul(&tmp, &t2)
+	tmp.Mul(&beta, &e.S3).Add(&tmp, &o).Add(&tmp, &gamma)
+	t2.Mul(&tmp, &t2).Mul(&t2, &zShifted)
+
+	tmp.Mul(&beta, &id1).Add(&tmp, &l).Add(&tmp, &gamma)
+	tmp2.Mul(&beta, &id2).Add(&tmp2, &r).Add(&tmp2, &gamma)
+	tmp.Mul(&tmp, &tmp2)
+	tmp2.Mul(&beta, &id3).Add(&tmp2, &o).Add(&tmp2, &gamma)
+	tmp.Mul(&tmp2, &tmp).Mul(&tmp, &e.Z)
+
+	t2.Sub(&t2, &tmp)
+
+	// 2.3 (z-1)*l1
+	var one fr.Element
+	one.SetOne()
+	t3.Exp(zeta, big.NewInt(int64(vk.Size))).Sub(&t3, &one)
+	tmp.Sub(&zeta, &one).Inverse(&tmp).Mul(&tmp, &vk.SizeInv)
+	t3.Mul(&tmp, &t3)
+	tmp.Sub(&e.Z, &one)
+	t3.Mul(&tmp, &t3)
+
+	// 2.4 (ql*l+s+qk) + α*(z(ux)*(l+β*s1+γ)*...-z*(l+β*id1+γ)..)+ α²*z*(l1-1)
+	lhs.Set(&t3).Mul(&lhs, &alpha).Add(&lhs, &t2).Mul(&lhs, &alpha).Add(&lhs, &t1)
+
+	return lhs
 }
 
 // completeQk returns ∑_{i<nb_public_inputs}w_i*L_i
