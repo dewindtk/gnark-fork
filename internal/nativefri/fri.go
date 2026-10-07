@@ -233,11 +233,18 @@ func convertCanonicalSorted(i, n int) int {
 // the verifier needs to evaluate ∑ₖ oracle(iₖ)xᵏ to build
 // the folded function.
 func (s radixTwoFri) deriveQueriesPositions(pos int, size int) []int {
+	return queryChain(pos, size, s.nbSteps)
+}
+
+// queryChain returns, for an initial position pos in the sorted first layer of
+// size size, the sorted position of the same query chain in each of the
+// nbSteps layers.
+func queryChain(pos, size, nbSteps int) []int {
 
 	_s := size / 2
-	res := make([]int, s.nbSteps)
+	res := make([]int, nbSteps)
 	res[0] = pos
-	for i := 1; i < s.nbSteps; i++ {
+	for i := 1; i < nbSteps; i++ {
 		t := (res[i-1] - (res[i-1] % 2)) / 2
 		res[i] = convertCanonicalSorted(t, _s)
 		_s = _s / 2
@@ -403,6 +410,12 @@ func (s radixTwoFri) newTranscript() (*fiatshamir.Transcript, []string) {
 // commitment (all the roots and the final evaluation) is bound, and position j
 // is H(seed ∥ j) mod |domain|.
 func (s radixTwoFri) deriveQueryPositions(fs *fiatshamir.Transcript, name string, evaluation fr.Element) ([]int, error) {
+	return queryPositions(s.h, fs, name, evaluation, s.domain.Cardinality)
+}
+
+// queryPositions binds the final evaluation, draws one seed from the
+// transcript and returns the nbQueries positions H(seed ∥ j) mod cardinality.
+func queryPositions(h hash.Hash, fs *fiatshamir.Transcript, name string, evaluation fr.Element, cardinality uint64) ([]int, error) {
 	if err := fs.Bind(name, evaluation.Marshal()); err != nil {
 		return nil, err
 	}
@@ -411,12 +424,12 @@ func (s radixTwoFri) deriveQueryPositions(fs *fiatshamir.Transcript, name string
 		return nil, err
 	}
 	var bPos, bCardinality big.Int
-	bCardinality.SetUint64(s.domain.Cardinality)
+	bCardinality.SetUint64(cardinality)
 	var j [8]byte
 	res := make([]int, nbQueries)
 	for i := range res {
 		binary.BigEndian.PutUint64(j[:], uint64(i))
-		bPos.SetBytes(hashOf(s.h, seed, j[:]))
+		bPos.SetBytes(hashOf(h, seed, j[:]))
 		bPos.Mod(&bPos, &bCardinality)
 		res[i] = int(bPos.Uint64())
 	}

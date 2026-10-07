@@ -238,7 +238,8 @@ Done: Phase 0–2 (restore, compile, shared circuit suite 30/30); security fix A
 **Step 1 — Fix B: out-of-domain `zeta` (DEEP), coset domain, batched opening, VK binding. Blocks "sound".**
 - B1 design: **approved 2026-10-07 — see "Fix B design (B1)" below.** Covers considerations 1, 3, 5 (coset domain, VK digest, setup binding).
 - **B4 red test written first (2026-10-07):** `TestForgeryZetaInDomain` — fails today (36/800 forgeries accepted), must pass (0) after B3. Branch stays unmerged until then.
-- B2 `nativefri` API + tests. B3 rewire setup/prove/verify. Remaining B4 tests (lie at ζ, ZK-leak probe) alongside. Details in the design section.
+- **B2 done (2026-10-07):** `internal/nativefri/batch.go` (`Scheme`, `Commit`, `Open`, `Verify`) + `batch_test.go`, alongside the old API (removed in B3). 
+- B3 rewire setup/prove/verify. Remaining B4 tests (lie at ζ, ZK-leak probe) alongside. Details in the design section.
 
 **Step 2 — Fix C: blinding vs revealed evaluations (zero-knowledge).** Also add a separate random blinding polynomial to the FRI batch (consideration 2, [HK24]). After B the exact count is known: each committed poly is revealed at ~2·86 FRI positions + its `zeta` openings → blinding degree must be ≥ that; FRI degree bound/domain sizing must absorb it. RedShift samples outside D for perfect ZK — check §6.
 
@@ -391,3 +392,12 @@ Measured per-query acceptance of garbage = 1/8 = ρ, i.e. the conjectured regime
 - Hook: `prove(..., transcriptPublic, ...)` (unexported; `Prove` passes nil → unchanged). Lets tests play a cheater without copying the prover; seed for the Step 3 malicious-prover harness.
 - Result: **36/800 accepted (4.5%), all 36 with ζ ∈ H**; prediction 1/16·3/4 = 4.69% (n=4, row 0 excluded). Theory and measurement agree; cause confirmed, not just correlated.
 - Test is red on `pq-pcs-dev` by design; it becomes the acceptance criterion for fix B (must be 0/800). Next: B2.
+
+### 2026-10-07 (cont.) — B2: batched DEEP-FRI in `nativefri`
+- New file `internal/nativefri/batch.go`; old per-polynomial API kept untouched so every package stays green until B3 switches PLONK over (only shared helpers `queryChain`/`queryPositions` extracted).
+- Key simplification (`2022-1216` §3.7): FRI over the coset a·D = plain FRI over D on `q(a·X)`. Committed values are the same; only the DEEP quotient uses the real point `x = a·gⁱ`. → fix A's folding code reused unchanged.
+- API: `NewScheme(degreeBound, h)`; `Commit(polys...)` (one tree, leaf = all polys at one point, sibling pair {x, −x} adjacent); `Open(seed, committed, claims)` / `Verify(seed, commitments, claims, proof)`. Transcript binds caller seed + every root (+width) + every claim (point, poly ref, value) before λ; folding challenges + query seed follow. Points in a·D rejected (`ErrPointInDomain`); leaves parsed canonically. Merkle openings are now pair openings (two rows + one path) instead of fix A's `[2]MerkleProof` trick.
+- Tests (all green): coset evaluation correct and disjoint from the subgroup (so from H); completeness for degree bounds 2/4/64 with PLONK-like layout (3 commitments, claims at z and ω·z); **false evaluation 0/100 accepted, high-degree poly 0/100 accepted — all 200 rejected by the folding check**, i.e. by the intended mechanism; 12 tampering cases rejected.
+- Observation: tampering with anything bound into Fiat-Shamir (seed, claims, final evaluation) is rejected via *Merkle path* errors because the query positions move. Correct, but it means only the "cheater re-runs the prover on its lie" tests exercise the folding check — that's why those two tests tally the rejection reason.
+- Fixture bug found by the completeness test (3-coeff poly with degreeBound 2 → `ErrDegree`): test bug, not scheme bug.
+- Next: B3 — rewire PLONK setup/prove/verify onto `Scheme`; acceptance criterion `TestForgeryZetaInDomain` 0/800.
