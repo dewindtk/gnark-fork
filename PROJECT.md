@@ -178,6 +178,7 @@ Lessons that generalize: (a) passing honest-proof tests says nothing about sound
 - [x] Security fix A: multi-query FRI (86 queries, proven 128-bit) + opening/ID binding fixes.
 - [ ] **Security fix B (next, blocks everything else)**: out-of-domain `zeta` via DEEP/RedShift quotient — see "Security status".
 - [ ] Security fix C: blinding degree vs revealed evaluations (after B).
+- [ ] Phase 3 prerequisite: the in-circuit FRI gadget `std/commitments/fri` (from PR #2, `restore-fri-gadget`) still has `const nbRounds = 1` — the same 1-query weakness fix A removed natively. It is unused today; port the fix-A structure (one commit phase, 86 queries, root/ID binding) before using it for recursion.
 - [ ] Cheap wins: verify the 11 fixed VK proximity proofs once at setup instead of on every Verify (~60% of verify time); Merkle path de-duplication across queries (proof size).
 - [ ] Decide post-v1 direction: batched openings (prover is ~10–14× slower than KZG), more curves, or in-circuit verifier.
 - [ ] Read `computeQuotientCanonical`'s coset-FFT trick and the `pk.Permutation[i]` bookkeeping in `computeBlindedZCanonical` in full (not yet done).
