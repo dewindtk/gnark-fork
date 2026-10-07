@@ -258,6 +258,8 @@ Done: Phase 0–2 (restore, compile, shared circuit suite 30/30); security fix A
 5. Then cost (F6 size, F7 prover time — profile first), F9 PQ-target reading, F10 Phase 3.
 - In parallel, outside the code: **F1 external review** — PROJECT.md (designs B1/C1, security table, lessons) + the attack/ZK tests are the claims to hand over.
 
+**Development paused 2026-10-07** for a supervisor presentation. Resume at item 1 (F3). Presentation deck (decisions, arguments, benchmarks): https://claude.ai/artifact/PWgnNpgaFTsa8dXZqFtcZP
+
 ## Follow-ups (after fixes A–C) — recorded 2026-10-07
 
 Status at this point: plonkfri on bn254 is sound (fix A + B) and honest-verifier zero-knowledge (fix C) by construction, with a test per mechanism; **not externally reviewed**. Items are grouped by when they matter; within a group, roughly by priority. Each has a "done when" so it can be worked test-first like A–C.
@@ -572,3 +574,7 @@ Measured per-query acceptance of garbage = 1/8 = ρ, i.e. the conjectured regime
 
 ### 2026-10-07 (cont.) — next steps fixed
 - PRs #6 (fix C) and #7 (follow-ups) merged. Order decided: F3 → F2 → F4 → F5 → cost/research/Phase 3; F1 review in parallel. Recorded under "Open questions / next steps".
+
+### 2026-10-07 (cont.) — development paused, presentation prepared
+- Development stopped at the user's request; all work merged to `master` (PRs #1–#7 plus this docs PR). Resume at F3 (see "Next steps").
+- Supervisor deck (21 slides, speaker notes carry the reasoning): context and v1 choices, restoration bugs, the six-defect audit, fixes A/B/C with mechanism, decisions and measured attacks, method, test inventory, soundness error budget, completeness/ZK arguments, benchmarks per stage vs KZG, limitations, next steps, references. Link under "Next steps".
