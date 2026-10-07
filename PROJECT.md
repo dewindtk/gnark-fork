@@ -171,7 +171,7 @@ A FRI-PLONK proof rests on two promises: (1) every committed table is a low-degr
 
 Parameter choice (decided 2026-10-07): **proven** 128-bit, not conjectured. Rationale: once FRI folds once, query count costs only proof size/verify time, not prover time (RedShift §6–7), and the proven regime keeps knowledge-soundness extractable. Conjectured alternative (43 queries, ~half the size) remains an opt-in for later. Sources: `resources/2020-654.pdf` §3.2/§8 (2λ/log(1/ρ) proven for q ≫ n²; λ/log(1/ρ) conjectured), `resources/2019-1400.pdf` Table 1, `resources/Revision2OfTR17-134.pdf` Thm 3.3 / Conj. 1.5.
 
-Lessons that generalize: (a) passing honest-proof tests says nothing about soundness — every check needs a test that a *cheating* prover is rejected; (b) any value the verifier uses must be bound to something it verified (here: `ClaimedValue` ↔ leaf, `ID` ↔ `Roots[0]`, layer sizes computed not trusted); (c) measure acceptance rates empirically — the 1/8 measurement exposed concern 1 before the theory did. From fix B: (d) write the attack test *before* the fix and check its measured rate against a prediction (36/800 vs 4.69% predicted) — a match confirms the cause, not just a correlation; (e) record *which* check rejects each cheater: the in-domain-zeta forgery is caught by the identity check, the lie-at-zeta by FRI folding, so each defence is shown to do its own job (tampering with transcript inputs is caught indirectly — query positions move — and does not test folding); (f) anything prover and verifier must agree on (claim order → batching coefficients, transcript order) comes from one shared function, not two copies; (g) estimate before measuring (0.9 MB estimated, 0.84 MB measured) so surprises are visible.
+Lessons that generalize: (a) passing honest-proof tests says nothing about soundness — every check needs a test that a *cheating* prover is rejected; (b) any value the verifier uses must be bound to something it verified (here: `ClaimedValue` ↔ leaf, `ID` ↔ `Roots[0]`, layer sizes computed not trusted); (c) measure acceptance rates empirically — the 1/8 measurement exposed concern 1 before the theory did. From fix B: (d) write the attack test *before* the fix and check its measured rate against a prediction (36/800 vs 4.69% predicted) — a match confirms the cause, not just a correlation; (e) record *which* check rejects each cheater: the in-domain-zeta forgery is caught by the identity check, the lie-at-zeta by FRI folding, so each defence is shown to do its own job (tampering with transcript inputs is caught indirectly — query positions move — and does not test folding); (f) anything prover and verifier must agree on (claim order → batching coefficients, transcript order) comes from one shared function, not two copies; (g) estimate before measuring (0.9 MB estimated, 0.84 MB measured) so surprises are visible. From fix C: (h) privacy can't be tested by sampling (every 254-bit value looks random) — test the structural condition the proof relies on (full rank of the blinding map on the revealed points), red first; (i) demonstrate a design rule by showing the attack it prevents succeeding without it (crafted mask: 50/50 unsafe vs 0/50), and make the test fail if the attack stops working, so it can't become vacuous; (j) re-derive a formula on the *old* parameters and match the old code before using it with new ones (piece size n+2 ✓ → n+231); (k) when a struct gains a field, check every copy helper (mask `clone()` bug); (l) to measure old behaviour, use a `git worktree` at the old commit, not `git stash`.
 
 ## Literature basis for the security plan (checked 2026-10-07)
 
@@ -242,18 +242,22 @@ Done: Phase 0–2 (restore, compile, shared circuit suite 30/30); security fix A
 - **B2 done (2026-10-07):** `internal/nativefri/batch.go` (`Scheme`, `Commit`, `Open`, `Verify`) + `batch_test.go`, alongside the old API (removed in B3). 
 - **B3 done:** setup/prove/verify on `Scheme`; old per-polynomial `nativefri` API removed. B4 tests: in-domain-zeta forgery 0/800, lie-at-zeta 0/200, witness-leak 0/516.
 
-**Step 2 — Fix C: zero-knowledge. C1 design drafted 2026-10-07 — see "Fix C design (C1)" below; decisions 1–3 approved (173, mask always on, larger tiny proofs). C2 red test written 2026-10-07 (`zk_test.go`, fails as intended). C3 done (mask R in nativefri). C4 done (blinding + randomized split; `TestRevealedValuesAreUniform` green). Next: C5 (final checks, docs, PR).** Original note: Also add a separate random blinding polynomial to the FRI batch (consideration 2, [HK24]). After B the exact count is known: each committed poly is revealed at ~2·86 FRI positions + its `zeta` openings → blinding degree must be ≥ that; FRI degree bound/domain sizing must absorb it. RedShift samples outside D for perfect ZK — check §6.
+**Step 2 — Fix C: zero-knowledge. C1 design drafted 2026-10-07 — see "Fix C design (C1)" below; decisions 1–3 approved (173, mask always on, larger tiny proofs). C2 red test written 2026-10-07 (`zk_test.go`, fails as intended). C3 done (mask R in nativefri). C4 done (blinding + randomized split; `TestRevealedValuesAreUniform` green). C5 done. ✅ Fix C complete.** Original note: Also add a separate random blinding polynomial to the FRI batch (consideration 2, [HK24]). After B the exact count is known: each committed poly is revealed at ~2·86 FRI positions + its `zeta` openings → blinding degree must be ≥ that; FRI degree bound/domain sizing must absorb it. RedShift samples outside D for perfect ZK — check §6.
 
 **Decided — security target (consideration 4):** option (a), classical 128 bits + "plausibly PQ" (see Design decisions). To revisit: explicit PQ target after reading [CMS19] / Chiesa–Yogev / NIST PQC criteria; optional grinding to trade queries for prover work.
 
-**Step 3 — Malicious-prover test harness.** A reusable way to build deliberately bad proofs (lying openings, pointwise-H, bad-gate witness) so every soundness claim has a test that a cheater fails. Partly built during B4.
+**Step 3 — Malicious-prover test harness.** A reusable way to build deliberately bad proofs (lying openings, pointwise-H, bad-gate witness) so every soundness claim has a test that a cheater fails. Largely built during B4/C3: `prove(…, transcriptPublic)`, `testHookBeforeOpen`, `Scheme.commit`/`commitEvals`/`open(…, mask)`, `firstClaimPower`. Remaining: collect them behind one documented test helper; add pointwise-H and wrong-permutation cheaters.
 
 **After "sound + ZK"** (pick by priority):
 - Proof serialization (`WriteTo`/`ReadFrom`) — none exists; needed for any real use.
 - Size/speed: Merkle path dedup / caps, parallel hashing.
 - Phase 3: port fix A/B to the in-circuit gadget, Poseidon2, recursive verifier.
 - Features: BSB22 commitments, more curves.
-- Housekeeping: `playground_test.go` (keep/delete?), `internal/stats/generate/main.go`.
+- Housekeeping: `internal/stats/generate/main.go`.
+- Concurrency: `nativefri.Scheme` holds one `hash.Hash` → a VK can't be shared across goroutines; use a hash constructor.
+- Tiny circuits: ZK blinding sets DegreeBound ≥ 512 (2-constraint proof 0.43 MB); could size blinding by the actual domain (fewer distinct query points when |D| is small) if it matters.
+- Reconcile HK24's quotient-randomizer count (87) with ours (173) — C.7 point 1.
+- External review of fixes A–C before any real use.
 
 ## Fix B design (B1) — approved 2026-10-07
 
@@ -372,6 +376,19 @@ The same idea is applied twice more: to the quotient pieces (they are revealed t
 - Prove time at 65k: same domains (DegreeBound and quotient domain unchanged); + one commitment of R (FFT on |D| + Merkle) → **~+5–10 %** (~2.1 s).
 - Tiny circuits (n = 4): DegreeBound 8 → 512, |D| 64 → 4096 → proofs of a few hundred KB, ms-level time.
 - Soundness unchanged: 86 queries, ρ = 1/8 (rate is defined by DegreeBound, which only grows for tiny n with |D| = 8·DegreeBound).
+
+### C.8 Results (measured 2026-10-07, after C5)
+| | before fix C (after B) | after fix C |
+|---|---|---|
+| Rank test (revealed points / random coefficients / rank) | l,r,o 159 / 2 / 2; z 160 / 3 / 3; h 159 / 0 / 0 — **fails** | l,r,o 171 / 174 / 171; z 172 / 174 / 172; h 171 / 173 / 171 — **full rank** |
+| Same statement opened twice | identical FRI layers | no shared layer root or final value |
+| Crafted mask cancelling a false claim | — | 0/50 (50/50 in the unsafe shared-λ⁰ variant) |
+| Attacks (zeta in domain / lie at zeta) | 0/800, 0/200 | 0/800, 0/200 |
+| 65534 constraints: setup / prove / verify / proof | 0.75 s / 1.97 s / 4.5 ms / 0.84 MB | 0.79 s / 2.10 s / 4.9 ms / **0.90 MB** |
+| 4094 constraints | 49 ms / 122 ms / 2.6 ms / 0.60 MB | 50 ms / 132 ms / 2.8 ms / 0.64 MB |
+| 2 constraints | ~0 / ~0 / 1 ms / 0.19 MB | 4 ms / 10 ms / 2 ms / 0.43 MB |
+
+Estimates (C.6) vs measured: +58 KB vs +60 KB at 65k; +5–10 % prove vs +7 %; tiny "few hundred KB" vs 0.43 MB.
 
 ### C.7 Open points
 1. Reconcile HK24 eq. (9)/(10) counting of FRI query points (one vs pair) — affects only whether 173 could be 87 later.
@@ -508,3 +525,8 @@ Measured per-query acceptance of garbage = 1/8 = ρ, i.e. the conjectured regime
 - All other tests green: attacks 0/800 and 0/200, leak 0/516, mask 0/50, suite 30/30 (+2 skipped), tiny 200, nativefri 10/10.
 - Measured: 65k and 4k unchanged vs C3 (DegreeBound stays 2n) — 65k: prove 2.15 s, verify 4.2 ms, 0.90 MB. Tiny circuit (2 constraints): proof 0.19 → 0.43 MB, prove ~0 → 10 ms (decision C7, as estimated). Side effect: the 800-attempt attack test went 1.0 s → 8.8 s for the same reason.
 - Measuring the pre-C4 tiny size needed the old code: done in a temporary `git worktree` at the C3 commit (a `git stash` attempt measured nothing — the stashed code lacked the tiny case).
+
+### 2026-10-07 (cont.) — C5: fix C complete
+- Final run: whole-repo build + every test package compiles; vet/gofmt clean; nativefri 10/10, suite 30/30 (+2 skipped), tiny 200, bn254 all green incl. attacks (0/800, 0/200), mask (0/50), leak (0/516), rank test (full rank).
+- Results table in "Fix C design" C.8; lessons (h)–(l) added to "Lessons that generalize"; next steps updated (Step 3 harness mostly exists; concurrency, tiny-circuit sizing, HK24 87-vs-173, external review added).
+- Status: plonkfri on bn254 is sound and (honest-verifier) zero-knowledge by construction, with tests for each mechanism; not externally reviewed.
