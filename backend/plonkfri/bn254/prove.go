@@ -68,6 +68,14 @@ type Proof struct {
 }
 
 func Prove(spr *cs.SparseR1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...backend.ProverOption) (*Proof, error) {
+	return prove(spr, pk, fullWitness, nil, opts...)
+}
+
+// prove is Prove with one test-only knob: if transcriptPublic is non-nil, it
+// replaces the public inputs bound into Fiat-Shamir, while every polynomial is
+// still computed from fullWitness. An honest prover never does this; tests use
+// it to play a cheater who proves one statement but presents another.
+func prove(spr *cs.SparseR1CS, pk *ProvingKey, fullWitness witness.Witness, transcriptPublic fr.Vector, opts ...backend.ProverOption) (*Proof, error) {
 	opt, err := backend.NewProverConfig(opts...)
 	if err != nil {
 		return nil, err
@@ -124,9 +132,12 @@ func Prove(spr *cs.SparseR1CS, pk *ProvingKey, fullWitness witness.Witness, opts
 	}
 
 	// 3 - compute Z, challenges are derived using L, R, O + public inputs
+	if transcriptPublic == nil {
+		transcriptPublic = fw[:len(spr.Public)]
+	}
 	dataFiatShamir := make([][fr.Bytes]byte, len(spr.Public)+3)
 	for i := 0; i < len(spr.Public); i++ {
-		copy(dataFiatShamir[i][:], fw[i].Marshal())
+		copy(dataFiatShamir[i][:], transcriptPublic[i].Marshal())
 	}
 	copy(dataFiatShamir[len(spr.Public)][:], proof.LROpp[0].ID)
 	copy(dataFiatShamir[len(spr.Public)+1][:], proof.LROpp[1].ID)
