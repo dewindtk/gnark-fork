@@ -35,11 +35,12 @@ func (c *refCircuit) Define(api frontend.API) error {
 func proofSize(p *Proof) int {
 	n := len(p.LRO) + len(p.Z) + len(p.H) + 16*fr.Bytes // roots, 15 evaluations + z(ω·zeta)
 	n += fr.Bytes                                       // final FRI evaluation
+	n += len(p.Opening.Mask)
 	for _, r := range p.Opening.Roots {
 		n += len(r)
 	}
 	for _, q := range p.Opening.Queries {
-		for _, op := range append(append([]nativefri.PairOpening{}, q.Commitments...), q.Layers...) {
+		for _, op := range append(append([]nativefri.PairOpening{q.Mask}, q.Commitments...), q.Layers...) {
 			n += len(op.Rows[0]) + len(op.Rows[1])
 			for _, h := range op.Path {
 				n += len(h)
