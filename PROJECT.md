@@ -577,4 +577,4 @@ Measured per-query acceptance of garbage = 1/8 = ρ, i.e. the conjectured regime
 
 ### 2026-10-07 (cont.) — development paused, presentation prepared
 - Development stopped at the user's request; all work merged to `master` (PRs #1–#7 plus this docs PR). Resume at F3 (see "Next steps").
-- Supervisor deck (21 slides, speaker notes carry the reasoning): context and v1 choices, restoration bugs, the six-defect audit, fixes A/B/C with mechanism, decisions and measured attacks, method, test inventory, soundness error budget, completeness/ZK arguments, benchmarks per stage vs KZG, limitations, next steps, references. Link under "Next steps".
+- Supervisor deck, cut to 8 slides at the user's request: four decision gates (security target, FRI query count, out-of-domain ζ, zero-knowledge), each as problem → academic study → implementation → measured outcome; plus context, benchmarks vs KZG at 65k, status/next steps. Speaker notes carry the reasoning. Link under "Next steps".
