@@ -56,7 +56,7 @@ func TestPerfRef(t *testing.T) {
 	if os.Getenv("PLONKFRI_PERF") == "" {
 		t.Skip("set PLONKFRI_PERF=1 to run")
 	}
-	for _, nb := range []int{1<<12 - 3, 1<<16 - 3} {
+	for _, nb := range []int{1, 1<<12 - 3, 1<<16 - 3} {
 		ccs, err := frontend.Compile(ecc.BN254.ScalarField(), scs.NewBuilder, &refCircuit{nbConstraints: nb})
 		if err != nil {
 			t.Fatal(err)

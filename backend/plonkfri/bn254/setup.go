@@ -28,8 +28,9 @@ import (
 	"github.com/consensys/gnark/internal/nativefri"
 )
 
-// minDomainSize is the smallest Domain[0] cardinality for which the FRI
-// domain sizing in Setup is valid (see Setup).
+// minDomainSize is the smallest Domain[0] cardinality; tinier systems are
+// padded to it. (It was needed by the former fixed FRI sizing; all sizes are
+// now derived by sizes, but the padding is kept as a safe floor.)
 const minDomainSize = 4
 
 // ErrCommitmentsUnsupported is returned by Setup for circuits using BSB22
@@ -94,8 +95,12 @@ type VerifyingKey struct {
 	CosetShift fr.Element
 
 	// DegreeBound is the number of coefficients every committed polynomial
-	// may have (a power of two); it sizes the FRI code, see Setup.
+	// may have (a power of two); it sizes the FRI code, see sizes.
 	DegreeBound uint64
+
+	// PieceSize k is the number of coefficients of each quotient piece:
+	// h = h1 + Xᵏ·h2 + X²ᵏ·h3, see sizes.
+	PieceSize uint64
 
 	// Pre commits to ql, qr, qm, qo, qk_incomplete, s1, s2, s3 (in this order;
 	// ql..qk prepended with the public-input placeholder rows, qk to be
@@ -126,7 +131,7 @@ func (vk *VerifyingKey) digest() []byte {
 	h := sha256.New()
 	h.Write([]byte("plonkfri-bn254-vk"))
 	var buf [8]byte
-	for _, v := range []uint64{vk.Size, vk.NbPublicVariables, vk.DegreeBound, uint64(vk.Pre.NbPolys)} {
+	for _, v := range []uint64{vk.Size, vk.NbPublicVariables, vk.DegreeBound, vk.PieceSize, uint64(vk.Pre.NbPolys)} {
 		binary.BigEndian.PutUint64(buf[:], v)
 		h.Write(buf[:])
 	}
@@ -135,6 +140,29 @@ func (vk *VerifyingKey) digest() []byte {
 	}
 	h.Write(vk.Pre.Root)
 	return h.Sum(nil)
+}
+
+// sizes returns, for a circuit domain of size n, the quotient piece size k and
+// the FRI degree bound (PROJECT.md, "Fix C design", C.4):
+//
+//   - the blinded l, r, o have n + nbBlindLRO coefficients, z n + nbBlindZ;
+//   - the identity's highest-degree term is the permutation part
+//     z(ωX)·Π(l + β·s + γ), of degree (n + nbBlindZ − 1) + 3·(n + nbBlindLRO − 1);
+//     dividing by Z_H (degree n) leaves h with
+//     3n + nbBlindZ + 3·nbBlindLRO − 3 coefficients, split in 3 pieces of k;
+//   - the randomized pieces h1, h2 have k + nbBlindQuotient coefficients: the
+//     largest committed polynomials, which set the FRI degree bound.
+//
+// (Check: with the original blinding 2, 3 and no quotient randomization this
+// gives k = n + 2, the former hard-coded value.)
+func sizes(n uint64) (pieceSize, degreeBound uint64) {
+	nbCoeffsH := 3*n + nbBlindZ + 3*nbBlindLRO - 3
+	pieceSize = (nbCoeffsH + 2) / 3
+	largest := pieceSize + nbBlindQuotient
+	if n+nbBlindZ > largest {
+		largest = n + nbBlindZ
+	}
+	return pieceSize, ecc.NextPowerOfTwo(largest)
 }
 
 // Setup sets proving and verifying keys
@@ -157,22 +185,14 @@ func Setup(spr *cs.SparseR1CS) (*ProvingKey, *VerifyingKey, error) {
 
 	// fft domains
 	sizeSystem := uint64(nbConstraints + len(spr.Public)) // len(spr.Public) is for the placeholder constraints
-	// The FRI domain below is sized for NextPowerOfTwo(Cardinality+2) and assumed
-	// to equal 2*Cardinality; Z (blinded with order 2) has Cardinality+3
-	// coefficients. Both only hold for Cardinality >= 4, so pad tiny systems.
 	if sizeSystem < minDomainSize {
 		sizeSystem = minDomainSize
 	}
 	pk.Domain[0] = *fft.NewDomain(sizeSystem)
 
-	// h, the quotient polynomial is of degree 3(n+1)+2, so it's in a 3(n+2) dim vector space,
-	// the domain is the next power of 2 superior to 3(n+2). 4*domainNum is enough in all cases
-	// except when n<6.
-	if sizeSystem < 6 {
-		pk.Domain[1] = *fft.NewDomain(8 * sizeSystem)
-	} else {
-		pk.Domain[1] = *fft.NewDomain(4 * sizeSystem)
-	}
+	// all other sizes follow from n = |H| and the blinding sizes
+	vk.PieceSize, vk.DegreeBound = sizes(pk.Domain[0].Cardinality)
+	pk.Domain[1] = *fft.NewDomain(3 * vk.PieceSize)
 	pk.Vk.CosetShift.Set(&pk.Domain[0].FrMultiplicativeGen)
 
 	vk.Size = pk.Domain[0].Cardinality
@@ -180,10 +200,6 @@ func Setup(spr *cs.SparseR1CS) (*ProvingKey, *VerifyingKey, error) {
 	vk.Generator.Set(&pk.Domain[0].Generator)
 	vk.NbPublicVariables = uint64(len(spr.Public))
 
-	// FRI degree bound: the largest committed polynomial is the blinded Z,
-	// with Cardinality+3 coefficients (L, R, O and h1, h2, h3 have
-	// Cardinality+2, the preprocessed ones Cardinality).
-	vk.DegreeBound = ecc.NextPowerOfTwo(pk.Domain[0].Cardinality + 3)
 	var err error
 	if vk.Fri, err = nativefri.NewScheme(vk.DegreeBound, sha256.New()); err != nil {
 		return nil, nil, err

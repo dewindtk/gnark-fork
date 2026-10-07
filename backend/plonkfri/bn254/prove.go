@@ -60,20 +60,26 @@ type Evaluations struct {
 	L, R, O, Z, H1, H2, H3         fr.Element // prover's
 }
 
-// Blinding sizes: the number of random coefficients added to each secret
-// polynomial (see PROJECT.md, "Fix C design"). l, r, o and z are blinded as
-// w + Z_H·r with r of nbBlindLRO / nbBlindZ coefficients; the quotient pieces
-// get nbBlindQuotient random coefficients (0: not randomized yet).
+// Blinding sizes for zero-knowledge (PROJECT.md, "Fix C design";
+// resources/2024-1037 Lemma 1, §4.1). A verifier sees each secret polynomial
+// at ζ, ω·ζ (z only) and at the pair {x, −x} of each of the NbQueries FRI
+// queries. The values it sees are uniformly random -- whatever the witness --
+// if the polynomial carries at least as many random coefficients as there are
+// revealed points:
+//   - l, r, o, z = w + Z_H·r, r with 2·(1 + NbQueries) = 174 coefficients
+//     (z: ζ, ω·ζ, 2·86 query points; l, r, o use the same bound);
+//   - quotient pieces h1, h2 randomized with t1, t2 of 1 + 2·NbQueries = 173
+//     coefficients (ζ and 2·86 query points); h3 is then determined.
 const (
-	nbBlindLRO      = 2
-	nbBlindZ        = 3
-	nbBlindQuotient = 0
+	nbBlindLRO      = 2 * (1 + nativefri.NbQueries)
+	nbBlindZ        = 2 * (1 + nativefri.NbQueries)
+	nbBlindQuotient = 1 + 2*nativefri.NbQueries
 )
 
-// pieceSize is the number of coefficients of each quotient piece h1, h2, h3,
-// h = h1 + X^k·h2 + X^{2k}·h3.
+// pieceSize is the number of coefficients k of each quotient piece,
+// h = h1 + Xᵏ·h2 + X²ᵏ·h3 (before randomization).
 func (vk *VerifyingKey) pieceSize() uint64 {
-	return vk.Size + 2
+	return vk.PieceSize
 }
 
 // ErrZetaInDomain is returned when zeta falls in the circuit domain H or the
@@ -556,15 +562,37 @@ func computeQuotientCanonical(pk *ProvingKey, evaluationConstraintsIndBitReverse
 		}
 	})
 
-	// put h in canonical form. h is of degree 3*(n+1)+2.
+	// put h in canonical form (3·pieceSize coefficients at most, see sizes).
 	// using fft.DIT put h revert bit reverse
 	pk.Domain[1].FFTInverse(h, fft.DIT, fft.OnCoset())
 
-	// split h into pieces of pieceSize coefficients
-	k := pk.Vk.pieceSize()
-	h1 := h[:k]
-	h2 := h[k : 2*k]
-	h3 := h[2*k : 3*k]
+	// split h into pieces of k coefficients and randomize them
+	// (resources/2024-1037 §4.1): with random t1, t2,
+	//   ĥ1 = h1 + Xᵏ·t1,  ĥ2 = h2 + Xᵏ·t2 − t1,  ĥ3 = h3 − t2,
+	// so that ĥ1 + Xᵏ·ĥ2 + X²ᵏ·ĥ3 = h (the verifier's check is unchanged)
+	// while the values of ĥ1, ĥ2 the verifier sees are uniformly random.
+	k := int(pk.Vk.pieceSize())
+	t1, t2 := make([]fr.Element, nbBlindQuotient), make([]fr.Element, nbBlindQuotient)
+	for i := range t1 {
+		if _, err := t1[i].SetRandom(); err != nil {
+			panic(err) // crypto/rand failure
+		}
+		if _, err := t2[i].SetRandom(); err != nil {
+			panic(err)
+		}
+	}
+	h1 := make([]fr.Element, k+nbBlindQuotient)
+	h2 := make([]fr.Element, k+nbBlindQuotient)
+	h3 := make([]fr.Element, k)
+	copy(h1, h[:k])
+	copy(h2, h[k:2*k])
+	copy(h3, h[2*k:3*k])
+	for i := 0; i < nbBlindQuotient; i++ {
+		h1[k+i].Add(&h1[k+i], &t1[i])
+		h2[k+i].Add(&h2[k+i], &t2[i])
+		h2[i].Sub(&h2[i], &t1[i])
+		h3[i].Sub(&h3[i], &t2[i])
+	}
 
 	return h1, h2, h3
 
