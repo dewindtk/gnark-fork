@@ -39,13 +39,13 @@ func TestProveSmoke(t *testing.T) {
 	// (non-empty rounds, non-empty ID -- ID is what gets bound into the
 	// Fiat-Shamir transcript for the next challenge).
 	for i, pp := range proof.LROpp {
-		assert.NotEmpty(pp.Rounds, "LROpp[%d] has no rounds", i)
+		assert.NotEmpty(pp.Queries, "LROpp[%d] has no queries", i)
 		assert.NotEmpty(pp.ID, "LROpp[%d] has no ID", i)
 	}
-	assert.NotEmpty(proof.Zpp.Rounds, "Zpp has no rounds")
+	assert.NotEmpty(proof.Zpp.Queries, "Zpp has no queries")
 	assert.NotEmpty(proof.Zpp.ID, "Zpp has no ID")
 	for i, pp := range proof.Hpp {
-		assert.NotEmpty(pp.Rounds, "Hpp[%d] has no rounds", i)
+		assert.NotEmpty(pp.Queries, "Hpp[%d] has no queries", i)
 		assert.NotEmpty(pp.ID, "Hpp[%d] has no ID", i)
 	}
 
