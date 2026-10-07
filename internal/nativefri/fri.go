@@ -108,6 +108,12 @@ type Round struct {
 	// to the queries of the verifier.
 	Interactions [][2]MerkleProof
 
+	// InitialRoot is the Merkle root of the original (unfolded) polynomial's
+	// evaluations -- i.e. the actual commitment to the polynomial being
+	// proven. Surfaced here so BuildProofOfProximity can copy it into
+	// ProofOfProximity.ID for Fiat-Shamir binding.
+	InitialRoot []byte
+
 	// evaluation stores the evaluation of the fully folded polynomial.
 	// The fully folded polynomial is constant, and is evaluated on a
 	// a set of size \rho. Since the polynomial is supposed to be constant,
@@ -435,6 +441,9 @@ func (s radixTwoFri) buildProofOfProximitySingleRound(salt fr.Element, p []fr.El
 			t.Push(evalsAtRound[i][k].Marshal())
 		}
 		rh := t.Root()
+		if i == 0 {
+			res.InitialRoot = rh
+		}
 		err := fs.Bind(xis[i], rh)
 		if err != nil {
 			return res, err
@@ -541,6 +550,11 @@ func (s radixTwoFri) BuildProofOfProximity(p []fr.Element) (ProofOfProximity, er
 		}
 		salt.Add(&salt, &one)
 	}
+
+	// bind the proof's identity to the commitment it actually attests to,
+	// not an arbitrary value -- this is what Fiat-Shamir challenges derived
+	// from proof.ID get bound to (see prove.go/verify.go).
+	proof.ID = proof.Rounds[0].InitialRoot
 
 	return proof, nil
 }

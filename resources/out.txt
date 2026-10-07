@@ -1,0 +1,1412 @@
+                RedShift: Transparent SNARKs from List Polynomial
+                                  Commitments
+               Assimakis A. Kattis                                         Konstantin Panarin                              Alexander Vlasov
+              New York University                                                Matter Labs                                   Matter Labs
+            New York, New York, USA                                            Berlin, Germany                               Berlin, Germany
+               kattis@cs.nyu.edu                                              kp@matterlabs.dev                             av@matterlabs.dev
+
+ABSTRACT                                                                                    any point of the computation, and thus hope to achieve proof size
+We introduce an efficient transformation from univariate polyno-                            minimization without compromising the trust model of the system.
+mial commitment based zk-SNARKs to their transparent counter-                                  The trade-off above is most closely associated with applica-
+parts. The transformation is achieved with the help of a new IOP                            tions of zero-knowledge proofs to cryptocurrency systems, such as
+primitive which we call a list polynomial commitment. This primi-                           Ethereum [40] or ZCash [34], in which participants have to verify
+tive is applicable for preprocessing zk-SNARKs over both prime and                          state (or transaction) validity to ensure system soundness but for
+binary fields. We present the primitive itself along with a soundness                       which there is limited space available in which to do so. Bridging
+analysis of the transformation and instantiate it with an existing                          the gap between these two requirements will allow for not only
+universal proof system. We also present benchmarks for a proof of                           efficient but also trustless verification of state transition in such
+concept implementation alongside a comparison with the current                              systems. This has the potential for scaling improvements, such as
+non-transparent state-of-the-art. Our results show competitive ef-                          increased transaction throughput or better privacy guarantees.
+ficiency both in terms of proof size and generation times. At the                              The most widely used proof systems for such an application are
+80-bit security level, our benchmarks provide proof generation                              preprocessing Succinct Non-interactive ARguments of Knowledge
+times of about a minute and proof sizes of around 515 KB for a                              (zk-SNARKs) [28] [33] [25], for which proof size and verification
+circuit with one million gates.                                                             time are polylogarithmic in the size of the circuit being verified.
+                                                                                            ‘Pre-processing’ here denotes that such systems rely on a one-time
+CCS CONCEPTS                                                                                (often expensive) setup procedure to produce a proving/verification
+                                                                                            key-pair (𝑝𝑘, 𝑣𝑘) (known as a Structured Reference String or SRS)
+• Theory of computation → Interactive proof systems.
+                                                                                            that is used in all subsequent computation. The most efficient such
+KEYWORDS                                                                                    construction is due to Groth [28] and achieves constant proof size
+                                                                                            consisting of 3 group elements, with state-of-the-art proving time.
+interactive proof systems, polynomial commitments, zk-SNARKs                                However, this design (along with most in the literature, see [24],
+ACM Reference Format:                                                                       [37], [8]) relies on a trusted setup, or a trusted third-party actor
+Assimakis A. Kattis, Konstantin Panarin, and Alexander Vlasov. 2022. Red-                   to generate certain parameters (known as the ‘toxic waste’) that
+Shift: Transparent SNARKs from List Polynomial Commitments. In Proceed-                     should be destroyed in order for the system to retain its security
+ings of the 2022 ACM SIGSAC Conference on Computer and Communications                       guarantees.
+Security (CCS ’22), November 7–11, 2022, Los Angeles, CA, USA. ACM, New
+                                                                                               Such a security lapse would be grave for all aforementioned ap-
+York, NY, USA, 19 pages. https://doi.org/10.1145/548606.3560657
+                                                                                            plications. For example, in a cryptocurrency system such as ZCash
+                                                                                            an adversary possessing such waste would be able to spend non-
+1     INTRODUCTION
+                                                                                            existent tokens without being found. An adopted approach to mit-
+Zero-knowledge proofs [27] have recently received increased amounts                         igating this issue involves Multi-Party Computation, in which a
+of attention for providing efficient verification while maintaining                         single participant needs to destroy their parameters for security to
+small proof sizes, even in the case of complex predicates. Initially                        hold [13]. However, scaling such an approach to many participants
+limited to theoretical considerations, such proof systems have lately                       comes with its own challenges, and can never reach the completely
+come to encompass the underlying technology in a wide variety                               trustless threat model desired by such systems.
+of practical and industrial applications with delicate trade-offs be-                          The trust issue inherent in the above approach stems from the
+tween privacy and system security [11] [17] [36]. In this work,                             requirements for the generation of the SRS of the proof at the pre-
+we are interested in applications for which there is limited space                          processing stage. This is done once at the beginning of the protocol,
+availability in the underlying system, and thus for which minimal                           encoding information that is used in the subsequent proof gener-
+proof size is an important property. Moreover, we ideally want to                           ation of any input arguments. More specifically, in most pairing-
+focus on applications for which there exist no trusted parties at                           based SNARKs (such as [32]) the trusted part of SRS generation
+Permission to make digital or hard copies of part or all of this work for personal or       stems from the usage of a polynomial commitment scheme that
+classroom use is granted without fee provided that copies are not made or distributed       needs to sample (secret) randomness in order to provide commit-
+for profit or commercial advantage and that copies bear this notice and the full citation
+on the first page. Copyrights for third-party components of this work must be honored.      ments to some low-degree polynomial that in turn encodes the
+For all other uses, contact the owner/author(s).                                            circuit in question. That information is then used by the prover
+CCS ’22, November 7–11, 2022, Los Angeles, CA, USA.                                         to efficiently convince the verifier that a given value is indeed the
+© 2022 Copyright held by the owner/author(s).
+ACM ISBN 978-1-4503-9450-5/22/11.
+                                                                                            evaluation of this polynomial, thus proving knowledge of the state-
+https://doi.org/10.1145/548606.3560657                                                      ment. Such systems use the polynomial commitment scheme of
+CCS ’22, November 7–11, 2022, Los Angeles, CA, USA.                                          Assimakis A. Kattis, Konstantin Panarin, and Alexander Vlasov
+
+
+[31], from which the above trust model is derived. This will be            are checked naively during the verification procedure. We expect
+further discussed in the following sections.                               that our scheme can also be adapted for this case and allow one
+    In attempting to retain a trustless (or ‘transparent’) threat model,   to express more complex STARK circuits. Finally, our contribution
+the main design challenge lies in the efficiency of the underlying         extends the approach described in [38], which comes at the cost of
+protocol. Various threads of work in this domain have achieved             larger proof sizes.
+different efficiency trade-offs. The work of [26] produces proofs
+with size scaling as 𝑂 (𝑑 log𝑇 ), while the proofs in [39] scale with      1.1.2 Universal zk-SNARKs. A new approach to the above prob-
+𝑂 (𝑑 log 𝐺) where 𝑇 , 𝑑 and 𝐺 the size, depth and width of the circuit     lem relies on creating a ‘universal’ SRS at the preprocessing phase,
+respectively. Succinct Transparent ARguments of Knowledge (zk-             which can then be used in tandem with any possible predicate (or
+STARKs) [4] achieve 𝑂 (log2 𝑇 ) proof sizes for uniform (layered)          circuit). This has been the focus of many recent contributions (see
+circuits. However, in the context of universal SNARKs (arbitrary           [32], [41], [35], [23]) that are also fully succinct zk-SNARKs in the
+circuits), existing proof systems suffer from performance overheads        above sense. The approach in such schemes relies on two main
+with respect to pre-processing SNARKs such as [28]. Some also              ingredients: (1) encoding the circuit satisfaction problem of the
+require non-trivial circuit designs, similar to what is described in       predicate in question as a property of some (low-degree) polyno-
+[21]. Nevertheless, we should note that for the class of problems          mial 𝑓 , and then (2) committing to 𝑓 using a PCS. In all the above
+that can be efficiently expressed as layered circuits, these proof         approaches, the PCS in [31] is used due to its constant size com-
+systems may be more optimal than universal ones. Since we are              plexity and efficient implementation. However, this is the only part
+also interested in verifier succinctness, transparent approaches such      in the protocol that introduces the trusted setup, as the setup phase
+as [14] do not suffice here due to the linear dependence between           in the scheme requires a trusted actor to create (and then destroy)
+verification time and predicate size.                                      a secret value that is only used in generating commitments.
+    Below we informally describe the properties that an ‘ideal’ proof
+system should possess for satisfiability of a given circuit 𝐶, where       1.1.3 zk-SNARK Compilation Frameworks. Recent work has also
+|𝐶 | denotes its size. The first three properties define what is known     explored general frameworks for converting Interactive Oracle
+as a ‘fully succinct’ zk-SNARK:                                            Proofs (IOPs) [7] into preprocessing SNARKs. This approach was
+                                                                           introduced in [18], with an equivalent formalization appearing
+      • Succinctness: Verifier time is polylogarithmic in |𝐶 |,            in [15]. At a high level, both of these contributions formalize the
+      • Prover Efficiency: Proving time is quasi-linear in |𝐶 |,           idea that preprocessing zk-SNARKs can be constructed from IOPs
+      • Proof Succinctness: Proof size is poly-logarithmic in |𝐶 |,        through oracle access to a low-degree polynomial.
+      • Transparent: No trust assumptions are required,
+      • Plausibly Quantum Resistant: Not based on assumptions
+        known to be false in the quantum setting.
+                                                                           1.2    Our Contributions
+                                                                           In this work, we provide the following contributions:
+1.1     Prior & Concurrent Work                                            1.2.1 List Polynomial Commitments. The works of [3] and [9] in-
+1.1.1 Polynomial Commitment Schemes. Polynomial commitment                 troduce the Fast Reed Solomon IOP of Proximity (FRI IOPP) - a
+schemes (PCS) allow for the efficient verification of the evaluations      novel protocol for efficient proximity testing, or checking if a given
+of 𝑓 at an arbitrary point in its domain. A transparent and efficiently    function is close to any low degree polynomial. Such a proximity
+computable PCS would yield transparent SNARK constructions that            tester may be naively turned into a transparent PCS, which pro-
+could satisfy all of the requirements of a fully succinct, transparent     vides commitments of size 𝑂 (log2 𝑑) for polynomials of degree 𝑑.
+and plausibly quantum resistant zk-SNARK. Since the introduction           However, the soundness error of such a commitment scheme is
+of PCS in [31], the first transparent such scheme
+                                                √     was introduced       rather large, and the protocol should be iterated many times to
+in [39] for multivariate polynomials, with 𝑂 ( 𝑑) commitment size          reach a sufficient security level. This results in large proof sizes and
+and verification complexity. Subsequent work in [15] introduces            computational burden. The reason for the large soundness error
+a scheme with 𝑂 (𝜇 log 𝑑) size and verification complexity, where          hides in the low sensitivity of FRI: when the Hamming distance
+𝜇 the number of variables of the polynomial in question and 𝑑 the          between two different polynomials is smaller than some predefined
+polynomial’s degree. Although the asymptotics of the approach              constant, it is impossible for FRI to efficiently distinguish them.
+in [15] suffice for the above motivation, the practical implemen-             In this work, we generalize the PCS in the sense that we construct
+tation of their system relies on cryptographic operations that are         a commitment to a list of proximate polynomials. We introduce
+substantially more resource-heavy than previous approaches. This           a new cryptographic primitive for fast verification of polynomial
+stems from the reliance of their system’s security on class groups of      evaluations we call a list polynomial commitment (LPC). At a high
+unknown order. Although the proof sizes achieved are sufficiently          level, this scheme retains the necessary security guarantees that are
+succinct, this dependence could make practical deployment difficult        required for polynomial-based proof systems such as [23] and [32]
+at reasonable security levels when proof generation time needs to          to compile into zk-SNARKs. In the language of IOP formalization,
+also be substantially efficient. Moreover, the assumptions on which        this primitive can be thought of as an alternative compiler for
+their construction rests are not quantum-resistant.                        public-coin IOP protocols.
+   The DEEP-ALI protocol [9] uses a similar construction in their
+STARK [4] proof system. In this case, all the setup polynomials,           1.2.2 Compilation of IOPs with LPCs. The above contribution im-
+constraints and checked relations are known to the verifier and            plicitly provides a general framework that demonstrates how the
+RedShift: Transparent SNARKs from List Polynomial Commitments                                      CCS ’22, November 7–11, 2022, Los Angeles, CA, USA.
+
+
+list polynomial commitment can be used to compile any polyno-             times, providing a promising avenue for transparent recursive proof
+mial IOP into a preprocessing zk-SNARK. As previously mentioned,          computations at scale.
+this follows the approach in [18] and [15] with the main difference
+being that we do not require a PCS in their (more restrictive) sense.
+                                                                          2    OVERVIEW
+1.2.3 RedShift. We demonstrate the security and practicality of           The proof system in [23] (known as PLONK) is based on polynomial
+this approach by compiling [23] using the framework above. By             commitments: the prover’s (secret) witness is encoded as a set of
+fitting an implementation of the list polynomial commitment on            univariate polynomials, while the verifier wishes to ensure this
+[23] with suitable adaptations and optimizations, we remove all           encoding satisfies some polynomial relations. The prover commits
+trusted computation while retaining efficiency in both proof size         to her witness polynomials and later the verifier queries their values
+and generation time. We call this new proof system RedShift, and          at a set of randomly selected points, checking if all relations are
+provide:                                                                  indeed satisfied. As the points were randomly sampled, it is highly
+   (1) formal proofs of correctness and security,                         likely that the given polynomial relations hold identically.
+   (2) a proof-of-concept implementation, along with benchmarks               The state-of-the-art PCS used in the construction of zk-SNARKs
+       establishing feasibility.                                          is the Kate commitment [31], which is based on pairings of points
+                                                                          of elliptic curves. The security of this scheme reduces to the Dis-
+   At an 80-bit security level and for circuits of size 220 , RedShift
+                                                                          crete Logarithm assumption, while in the case of a perfectly hiding
+provides proofs of size ∼ 515 KB with a proof generation time of
+                                                                          commitment the 𝑡-Strong Diffie Hellman assumption is required.
+about half a minute. Overall, RedShift is an efficient instantiation
+                                                                          The main drawback of Kate commitments is that some secret value
+of a potentially quantum-resistant transparent preprocessing zk-
+                                                                          is sampled during the parameter generation process. For security to
+SNARK suitable for practical deployments at high security.
+                                                                          hold, this value should never be revealed to the prover and verifier.
+                                                                          Such a requirement is very strong, as it means that every proof
+1.3    Transparent zk-SNARKs                                              system using Kate will require a ‘trusted’ setup process. We denote
+Prior work on transparent zk-SNARKs has explored a variety of             proof systems without this requirement as transparent. In fact, the
+trade-offs and different design choices in order to achieve efficiency    only reason PLONK requires a trusted setup is due to Kate. In
+gains. We briefly discuss concurrent and previous efforts in build-       this work we aim to investigate a suitable replacement for Kate,
+ing efficient and transparent proof systems and compare with our          turning PLONK (and similar systems) into zero-knowledge Succinct
+approach. The works of [6] and [20] design IOPs for the Rank-1            Transparent ARguments of Knowledge, i.e. zk-STARKs.
+Constraint System (R1CS) arithmetization, providing a compilation             We utilize the FRI protocol, which is a key component of STARKs
+framework equivalent to our methods. They require a holographic           such as [4] and [6]. FRI is focused on solving the following prox-
+lincheck argument/IOP of Proximity respectively in order to con-          imity problem: the verifier is given oracle access to an evaluation
+struct their IOP for R1CS, which our approach avoids by using a           of some function 𝑓 on a fixed domain 𝐷 ⊂ F. The prover wants to
+suitable transformation of the proof system in [23] instead. The          convince the verifier that this function 𝑓 is close (in some metric) to
+works of [42] (and [41], although not transparent) use a similar          a polynomial of (predefined) degree 𝑑. If the verifier queries 𝑓 on all
+approach but with the IOP from [27]. This makes our approach              of 𝐷 and then computes the interpolation polynomial herself, she
+easier to formalize.                                                      can verify the degree bound 𝑑. However, this requires 𝑂 (𝑑) com-
+   The authors of [4] and [3] use FRI implicitly as a PCS and design      plexity. FRI solves this problem by requiring only a polylogarithmic
+the ALI-IOP for compilation. Our results are directly applicable and      number of queries in 𝑑.
+generalize their approach. In [12], the authors define a restricted           We now describe a naive way to design a PCS using FRI:
+version of PCS that are ‘additive’ (with homomorphic properties),
+benchmarking with Bulletproofs [14] for fast recursion. While an              (1) The prover commits to 𝑓 , providing an oracle to all evalua-
+additive PCS is too restrictive to include FRI, batching efficiency               tions of 𝑓 on some predefined domain 𝐷.
+gains are possible if this definition is relaxed. The batch evaluation        (2) The prover and verifier engage in FRI for 𝑓 with respect
+problem in Section 4 of [12] is equivalent to a multivariate commit-              to some degree 𝑑. If the prover passes the check, the veri-
+ment, and the LCS is a relaxation of that notion that we selectively              fier is convinced with high probability that 𝑓 is close to a
+apply to proof witnesses. By relaxing the binding property of PCS,                polynomial of degree less than 𝑑.
+our LCS replaces [31] for transparent multivariate commitments to             (3) The verifier wants to retrieve the value of 𝑓 at point 𝑖 ∉ 𝐷.
+witness polynomials more generally.                                               The prover sends the corresponding opening 𝑧 = 𝑓 (𝑖) and
+   Subsequent work [1] has built on these ideas, looking at how two               both parties then conduct another instance of FRI, this time
+modular modifications to the proof system affect performance by us-               with respect to a quotient function 𝑞(𝑋 ) = (𝑓 (𝑋 ) −𝑧)/(𝑋 −𝑖)
+ing a smaller field for faster modular operations and implementing                and degree 𝑑 − 1. Note that the verifier has oracle access
+a leaner PLONK-derived IOP called turboPLONK [22] instead. The                    to 𝑞 via oracle access to 𝑓 and also knows 𝑖 and 𝑧. If the
+authors explore an additional avenue for optimization of proof effi-              prover passes the last instance of FRI then 𝑞(𝑋 ) is in fact a
+ciency by counterbalancing any soundness loss due to the smaller                  polynomial function of degree less than 𝑑 − 1.
+field by applying the tight parallel repetition theorem to the IOP in         (4) This implies that 𝑓 (𝑖) = 𝑧 which follows from Bezout’s
+order to boost soundness and performing FRI in a suitable extension               theorem stating that ℎ(𝑋 ) has value 𝑦 at point 𝑡 iff ℎ(𝑋 ) − 𝑦
+field. This is then shown to lend itself to efficient recursive proving           is divisible by 𝑋 − 𝑡 in the ring F[𝑋 ].
+CCS ’22, November 7–11, 2022, Los Angeles, CA, USA.                                             Assimakis A. Kattis, Konstantin Panarin, and Alexander Vlasov
+
+
+   In reality, this simplified protocol doesn’t suffice. There are sev-       dependence of our scheme on FRI means that we need to conduct
+eral reasons for that, among which are the following:                         our security analysis in the IOP model, affecting the soundness
+                                                                              proof as well as the proof of knowledge approaches.
+   (1) FRI has a sensitivity bound: it is incapable of distinguishing
+       between precise polynomials and functions sufficiently close
+       to them in some predefined metric (which in our case is the
+                                                                              3     DEFINITIONS
+       relative Hamming distance).                                            In this section, we lay out the building blocks that are necessary to
+   (2) For implementation coherency, we want the same domain for              describe our constructions.
+       both FRI instances. However, FRI has an interdependence be-
+       tween the degree 𝑑 and the size of the domain |𝐷 | measured            3.1     Notation
+       in terms of its rate 𝜌 = 𝑑/|𝐷 |. The structure of FRI requires         Through this paper we use the following notations:
+       the rate to be “2-adic”, i.e. of the form 2 −𝑅 for some 𝑅 ∈ N.               • F𝑞 is a prime field with modulus 𝑞
+       However, this property cannot simultaneously hold for two                    • 𝐷 ⊂ F evaluation domain for Reed Solomon codes
+       adjacent degrees 𝑑 and 𝑑 − 1 without protocol modification.                  • 𝑓 | 𝐷 is a restriction of function 𝑓 to domain 𝐷
+    The first problem means that the scheme needs to correctly                      • For function pair 𝑓 , 𝑔, the relative Hamming distance with
+process the case when the function is not a polynomial, but close                     respect to some domain 𝐷 is given by:
+to one; a property not naturally supported by existing commitment                                           |{𝑥 ∈ 𝐷 : 𝑓 (𝑥) ≠ 𝑔(𝑥)}|
+schemes. Even more so, allowing the oracle 𝑓 to not be strictly                                Δ(𝑓 , 𝑔) =                            .
+                                                                                                                       |𝐷 |
+polynomial and to take as the prover’s commitment the polynomial
+𝑓 ′ lying in a small 𝛿-ball around 𝑓 (where 𝛿 is taken according to           3.2     Preliminaries on Reed-Solomon codes
+the sensitivity of FRI) then we cannot guarantee a priori that this
+                                                                              Most of the information covered in this section can be found in
+polynomial 𝑓 ′ is unique in the chosen neighborhood of 𝑓 . The set
+                                                                              most standard on algebraic codes (e.g. [30]).
+of polynomials {𝑓1′, 𝑓2′, . . . , 𝑓𝑛′ } lying in the 𝛿-neighborhood of 𝑓 is
+the 𝛿-list of 𝑓 , which we denote by 𝐿𝛿 := 𝐿𝛿 (𝑓 ). For small values
+of 𝛿, the list 𝐿𝛿 contains only one polynomial: 𝛿 lies in the unique-            Definition 1 (Reed-Solomon Codes). For a subset of some field
+decoding radius. Unfortunately such values of 𝛿 require larger proof          𝐷 ⊆ F and a rate parameter 𝜌 ∈ (0, 1], we denote by RS[F, 𝐷, 𝜌] the
+sizes for the same soundness guarantees. Thus, increasing 𝛿 to                set of all functions 𝑓 : 𝐷 → F for which there exists 𝑓ˆ ∈ F<𝜌 |𝐷 | [𝑋 ]
+reduce proof sizes would lead to the size 𝐿𝛿 being greater than 1.            agreeing with 𝑓 on 𝐷. A prime field RS code family is a code fam-
+    To solve this, we consider a relaxed treatment of commitment              ily RS[F, 𝐷, 𝜌] for which F = F𝑞 for 𝑞 prime. In this case, 𝐷 is a
+schemes, where the commitment opens to a polynomial in the                    multiplicative subgroup of F𝑞∗ .
+𝛿-list 𝐿𝛿 . When the prover is asked for an evaluation at point 𝑖,
+they respond with some value 𝑓 ′ (𝑖), where 𝑓 ′ ∈ 𝐿𝛿 . In subsequent             Definition 2 (List Decoding). Let 𝑉 = RS[F, 𝐷, 𝜌] ⊂ F𝐷 be
+sections we show that this scheme is sufficient for the compilation           an RS code family. Set a distance parameter 𝛿 ∈ [0, 1]. For 𝑢 ∈ F𝐷 ,
+of holographic IOPs. During the execution of PLONK, the prover                we define 𝐿(𝑢, 𝑉 , 𝛿) to be the set of elements in 𝑉 that are at most
+and verifier need to evaluate a set of initial ‘constraint’ (or setup)        𝛿-far from 𝑢 in relative Hamming distance. The code 𝑉 is said to be
+polynomials 𝑐 (𝑋 ) encoding the constraint system itself. In order            (𝛿, 𝑁 )-list-decodable if |𝐿(𝑢, 𝑉 , 𝛿)| ≤ 𝑁 for all 𝑢 ∈ F𝑞𝐷 . Let 𝐿𝛿max =
+to achieve succinctness, the verifier never calculates the value 𝑐 (𝑖)        𝐿(F, 𝐷, 𝑑, 𝛿) be the maximum size of 𝐿(𝑢, 𝑉 , 𝛿) taken over all 𝑢 ∈ F𝐷
+at point 𝑖 by herself. PLONK instead relies on Kate: the prover               for 𝑉 = RS[F, 𝐷, 𝜌 = 𝑑/|𝐷 |].
+and verifier run Kate with the commitment to 𝑐 and value 𝑖 as
+inputs. By its binding property, the verifier is convinced that the              Theorem 1 (Johnson Bound). For every 𝜌 > 0, there exists a
+prover actually sends the evaluation 𝑐 (𝑖) of the polynomial 𝑐 (𝑋 ) in        constant 𝐶 𝜌 such that the code family RS[F, 𝐷, 𝜌] is list-decodable
+                                                                                         √
+question. Since our relaxation commits to a whole neighborhood                from a 1 − 𝜌 − 𝜖 fraction of errors with the following list size:
+𝐿𝛿 (𝑐) of 𝑐 (𝑋 ) instead of only 𝑐 (𝑋 ) itself, we lose uniqueness. This
+                                                                                                               √         𝐶𝜌
+means we can’t use such a ‘relaxed’ scheme as is. However, we                               𝐿(F, 𝐷, 𝜌 |𝐷 |, 1 − 𝜌 − 𝜖) ≤ √ := 𝐽𝜌,𝜖 ,
+show that with minor changes our LPC can be turned into a PCS.                                                          𝜖 𝜌
+                                                                                                   √
+We call this construction a polynomial evaluation scheme and it               for every 𝜖 ∈ (0, 1 − 𝜌).
+constitutes the second key sub-protocol of the paper.
+    With the list polynomial commitments and polynomial evalua-                 We also provide a (strong) conjecture that substantially improves
+tion schemes, we can modify PLONK to achieve full transparency.               on the above bound, which appears in [9].
+We call the modified version RedShift and prove its correctness in
+                                                                                  Conjecture 1 (List Decodability up to Capacity). For every
+the IOP model. A large portion of our approach remains the same as
+                                                                              𝜌 > 0, there exists a constant 𝐶 𝜌 such that the code family RS[F, 𝐷, 𝜌]
+in [23]: our modification doesn’t modify the completeness property
+                                                                              is list-decodable from a 1 − 𝜌 − 𝜖 fraction of errors with the following
+of the system. However, the FRI-based protocol doesn’t possess
+                                                                              list size:
+the hiding capabilities of Kate. This means that we need to take
+                                                                                                                              |𝐷 | 𝐶 𝜌
+                                                                                                                                 
+additional measures to achieve zero-knowledge for our system. We                               𝐿(F, 𝐷, 𝜌 |𝐷 |, 1 − 𝜌 − 𝜖) ≤            ,
+also need to change the security model as the original PLONK pro-                                                              𝜖
+tocol was proven secure in the Algebraic Group Model (AGM). The               for every 𝜖 ∈ (0, 1 − 𝜌).
+RedShift: Transparent SNARKs from List Polynomial Commitments                                       CCS ’22, November 7–11, 2022, Los Angeles, CA, USA.
+
+
+  We now look at which distance parameters 𝛿 provide unique                  Definition 5. Let 𝐴, 𝐵 be PPT algorithms, 𝑥, 𝑦 ∈ {0, 1}∗ and
+decodability. To this end, we provide some standard results on the        View(𝐵(𝑥, 𝑦), 𝐴(𝑥)) the view (or transcript) of 𝐴(𝑥) in an IOP with
+unique decodability of RS codes.                                          𝐵(𝑥, 𝑦). This is the random variable (𝑥, 𝑟, {𝑎𝑖 , 𝑚𝑖 }𝑛𝑖=1 ) where 𝑥, 𝑟 are
+                                                                          𝐴’s input and randomness and 𝑎𝑖 is 𝐵’s (𝑖-th) answer to 𝐴’s query 𝑚𝑖 .
+   Definition 3. We call 𝛿 0 the unique decoding radius (UDR) for
+code family 𝐶 if it is the maximum 𝛿 0 for which 𝐿𝛿max ≤ 1. We denote     State-Restoration Knowledge Soundness Strengthening the
+                                                    0
+all 𝛿 < 𝛿 0 as being within the unique decoding radius.                   notion of soundness, we say the IOP has knowledge soundness
+                                                                          𝑒 : {0, 1}∗ → [0, 1] if every prover 𝑃 ∗ who is capable of convincing
+   Theorem 2. The UDR for RS[F, 𝐷, 𝜌] is 𝛿 0 = (1 − 𝜌)/2.
+                                                                          the verifier that 𝑥 ∈ L (R) actually knows some witness 𝑤 ∈ R|𝑥 .
+    The decoding problem for the Reed-Solomon code 𝑉 = RS[F, 𝐷, 𝜌]        Put differently, the IOP is knowledge sound if for all adversaries
+is the problem of finding a codeword 𝑢 ∈ 𝑉 that is within distance        A there exists a (non-uniform) PPT extractor E A (𝑥) which gets
+𝛿 (with respect to Hamming distance) of a given word 𝑣 ∈ F𝐷 .             full access to the adversary’s transcript at any stage. However, this
+There exists a standard polynomial-time solution known as the             does not include A’s random coins, auxiliary inputs and internal
+Guruswami-Sudan [29] algorithm. Its output includes all codewords         code. We say that (𝑃, 𝑉 ) has proof of knowledge 𝜖 if there exists E
+lying in the 𝛿-ball of 𝑣.                                                 s.t. for every 𝑥 ∈ 𝑆 and PPT A:
+                                                            √                           h                 i
+    Theorem 3 (Guruswami-Sudan). For all 𝛿 ≤ 1 − 𝜌, the code
+                                                                    √                Pr (𝑥, E A (𝑥)) ∈ R ≥ Pr [(A, 𝑉 ) = 1] − 𝑒 (𝑥).
+𝑉 = RS[F, 𝐷, 𝜌] can be list-decoded in time 𝑂 (|𝐷 | 15 ). If 𝛿 < 1 − 𝜌,
+this reduces to 𝑂 (|𝐷 | 3 ).                                                 Since we are ultimately interested in compiling the IOP into a
+                                                                          non-interactive proof, the stronger notion of state-restoration IOP
+3.3    Interactive Oracle Proofs and IOPs of                              soundness error 𝜖sr (𝑟 ), where 𝑟 the maximal number of rounds, is
+       Proximity                                                          needed. This is because the protocol should be robust against state-
+                                                                          restoration attacks, in which the prover has the ability to move to a
+Given some relation R ⊆ 𝑆 × 𝑇 , we denote by L (R) ⊆ 𝑆 the set            previous state of the protocol up to 𝑟 times. It was shown in [7] that
+of 𝑠 ∈ 𝑆 such that there exists 𝑡 ∈ 𝑇 with (𝑠, 𝑡) ∈ R (also known         this notion suffices in compiling proofs using Fiat-Shamir in the ran-
+as the language defined by R). We also denote by R|𝑠 ⊆ 𝑇 the set          dom oracle model, while [16] show this for correlation-intractable
+{𝑡 ∈ 𝑇 : (𝑠, 𝑡) ∈ R}. For pairs (𝑥, 𝑤) ∈ R, we call 𝑥 the instance        hash functions as well. In order to prove state-restoration bounds,
+and 𝑤 the witness.                                                        the idea of round-by-round soundness error 𝜖rbr is leveraged. It can
+   The security analysis in this section will be conducted in the         be shown that 𝜖sr ≤ 𝑟 · 𝜖rbr , which is sufficient for security if 𝑟 is a
+Interactive Oracle Proof (IOP) model [7] which is a generalization        polynomial number of rewinds/rounds. This analysis holds since
+of Interactive Proofs and Probabilistically Checkable Proofs. More        we can apply the round-by-round extractor to every partial tran-
+specifically, we will be looking at holographic IOPs, or IOPs in          script that comprises trsr and output the first valid witness. Since
+which (preprocessed) indices are provided to the participating par-       the empty transcript is rejecting and trsr accepts, then some partial
+ties through oracles. The model consists of a prover/verifier tuple       transcript moves from rejecting to accepting. Since the round-by-
+(𝑃, 𝑉 ) of two probabilistic interactive algorithms. The number of        round extractor fails with probability 𝜖rbr , the result follows by a
+interactive rounds, denoted 𝑘 = 𝑟 (𝑥), is called the round complexity     union bound. We follow the approach in [16],[20] and provide the
+of the system. During a single round, the prover 𝑃 sends a message        required definitions.
+𝑎𝑖 (which may depend on prior interaction) to which the verifier 𝑉
+provides some response 𝑚𝑖 . The final output of 𝑉 after interacting          Definition 6 (Round-by-Round Soundness). An IOP (𝑃, 𝑉 )
+with 𝑃 is either accept or reject. We denote the result of this inter-    for language L (R) has round-by-round knowledge soundness 𝜖rbr if
+action by ⟨𝑃 (𝑥, 𝑤) ↔ 𝑉 (𝑥)⟩, where the input to 𝑉 is 𝑥 ∈ 𝑆 and the       there exists a function State from the set of transcripts to {0, 1} and
+input to 𝑃 is (𝑥, 𝑤) ∈ 𝑆 × 𝑇 . The proof length is the sum of lengths     a polynomial-time extractor E such that for all (𝑥, tr) for which
+                                                                          State(𝑥, tr) = 0, and all messages a received from the prover, if
+                                                              Í
+of all messages sent by the prover, herein denoted 𝑙 (𝑥) = 𝑘𝑖=1 𝑎𝑖 .
+The query complexity of the protocol, denoted 𝑞(𝑥), is the total          Pr𝑚 [State(𝑥, tr|a|𝑚) = 1] > 𝜖rbr then (𝑥, E (𝑥, tr|a)) ∈ R.
+number of entries read by 𝑉 .
+                                                                             Definition 7 (State-Restoration Soundness). An IOP (𝑃, 𝑉 )
+   Definition 4. A pair of interactive PPT algorithms (𝑃, 𝑉 ) is an       for language L (R) has state-restoration knowledge soundness 𝜖sr if
+interactive oracle proof system for some language R ⊆ 𝑆 × 𝑇 with          there exists a polynomial time extractor E such that for all 𝑥 and
+𝜖 : {0, 1}∗ → [0, 1] soundness and 𝑘 : {0, 1}∗ → N rounds of              every state-restoration prover 𝑃 ∗ :
+interaction if it satisfies the following properties:
+                                                                                      trsr accepts trsr ← View(𝑃 ∗ (𝑥), 𝑉 (𝑥))
+                                                                                                                              
+   (1) Completeness:                                                            Pr                                               ≤ 𝜖sr .
+                                                                                       (𝑥, 𝑤) ∉ R          𝑤 ← E (𝑥, trsr )
+           𝑃𝑟 [⟨𝑃 (𝑥, 𝑤) ↔ 𝑉 (𝑥)⟩ = 𝑎𝑐𝑐 |(𝑥, 𝑤) ∈ R] = 1
+                                                                             Definition 8 (Zero Knowledge). For a given relation R and
+   (2) Soundness: For all computationally unbounded malicious             some 𝑧 : {0, 1}∗ → [0, 1], ⟨𝑃, 𝑉 ⟩ has 𝑧-statistical honest-verifier
+       provers 𝑃 ∗ :                                                      zero knowledge if there exists a PPT algorithm 𝑆 (the simulator) s.t.
+        𝑃𝑟 ⟨𝑃 ∗ (𝑥, 𝑤) ↔ 𝑉 (𝑥)⟩ = 𝑎𝑐𝑐 |(𝑥, 𝑤) ∉ R ≤ 𝜖 (𝑥).                ∀(𝜙, 𝑤) ∈ R, 𝑆 (𝑥, 𝜙) and View(𝑃 (𝜙, 𝑤), 𝑉 (𝜙)) are 𝑧 (𝑥)-close.
+                                                
+
+       Probabilities are over the randomness of 𝑃 and 𝑉 , which engage    An important subclass of IOP protocols is given below.
+       in at most 𝑘 (𝑥) rounds of (adaptive) interaction.
+CCS ’22, November 7–11, 2022, Los Angeles, CA, USA.                                           Assimakis A. Kattis, Konstantin Panarin, and Alexander Vlasov
+
+
+IOPP. An Interactive Oracle Proof of Proximity (IOPP) is an 𝑟 -round           • Com : F<𝑑 [𝑋 ] → C commitment 𝑐 to some 𝑓 ,
+interactive IOP system for the following problem. Given a field F,             • Open : C × F<𝑑 [𝑋 ] → {0, 1} checks validity of some com-
+degree 𝑑 ∈ N, proximity parameter 𝛿 > 0 and domain 𝐷 ⊂ F, the                     mitment 𝑐 with access to 𝑓 .
+prover is provided with the representation of some function 𝑓 and             We say that the tuple (Gen, Com) is 𝜖-binding if there exists an
+the verifier is given oracle access to its evaluation on domain 𝐷 (i.e.     Open function for which:
+an oracle 𝑓ˆ(𝑥) to 𝑓 (𝑥)| 𝐷 ). The prover then needs to convince the                    h                                    i
+verifier that 𝑓 | 𝐷 is the evaluation of some degree 𝑑 polynomial on                 Pr Open(Com(𝑓 )) = 1|pp ← Gen(1𝜆 ) = 1,
+this domain. Namely, that 𝑓 ∈ RS[F, 𝐷, 𝜌 = 𝑑/|𝐷 |]. We follow the              and for all PPT adversaries A:
+formalization in [3]:                                                                                                          
+                                                                                     𝑓 ≠ 𝑔, Open(𝑐, 𝑓 ) = 1 (𝑓 , 𝑔, 𝑐) ← A (pp)
+                                                                                Pr                                                ≤ 𝜖 (𝜆).
+   Definition 9 (IOPP). A 𝑘-round IOP of Proximity (𝑃, 𝑉 ) is a                          Open(𝑐, 𝑔) = 1       pp ← Gen(1𝜆 )
+𝑘 + 1-round IOP. (𝑃, 𝑉 ) is an IOPP for the error-correcting code 𝐶 =          We are now ready to introduce the main ingredient underlying
+{𝑓 : 𝑆 → Σ} and soundness 𝜖 : [0, 1] → [0, 1] with respect to some          the transparency of our proving system, which we call a List Poly-
+metric Δ if the following hold:                                             nomial Commitment (LPC) scheme. This cryptographic primitive
+   (1) First message format: the first prover message is a purported        most resembles a polynomial commitment scheme, with the main
+       code-word, i.e. 𝑓 0 ∈ 𝐶,                                             difference arising from the need to show that 𝑔(𝑧) = 𝑦 where 𝑔 is a
+   (2) Completeness:                                                        polynomial in a 𝛿 neighborhood around 𝑓 (in a predefined metric
+          Pr[ 𝑃 (𝑓 0, 𝐶) ↔ 𝑉 (𝐶) = 𝑎𝑐𝑐 |Δ(𝑓 0, 𝐶) = 0] = 1,                 Δ), rather than requiring the evaluation of 𝑓 itself. As before, we
+                                                                            denote 𝐿𝛿 (𝑓 ) as the 𝛿-list of 𝑓 or the set of all 𝑔 ∈ RS[F, 𝐷, 𝜌] such
+    (3) Soundness: For any 𝑃 ∗ ,                                            that Δ(𝑓 , 𝑔) < 𝛿.
+        Pr[ 𝑃 ∗ (𝑓 0, 𝐶) ↔ 𝑉 (𝐶) = 𝑟𝑒 𝑗 |Δ(𝑓 , 𝐶) = 𝛿] ≥ 𝜖 (𝛿).
+                                                                            4.1    Specification
+   We note that the notions of proof and query complexity of IOPs
+                                                                            Here we define the generic primitive that formalizes the notion of
+translate naturally to the context of IOPPs. In the rest of the sections,
+                                                                            a list commitment scheme. We will build on this construction later
+we use IOPP(𝑓 0, 𝐶) → {0, 1} to denote an IOPP protocol IOPP with
+                                                                            to show that it admits (1) an efficient implementation, and (2) mod-
+purported code-word 𝑓 0 ∈ 𝐶 and 𝐶 error-correcting code family.
+                                                                            ifications that provide stronger proof-of-knowledge guarantees.
+3.4     Fast Reed-Solomon IOPP                                                 Definition 10. An (𝜖, 𝑘)-list polynomial commitment scheme for
+In our construction, we opt for using FRI [3], [10]. We provide             some metric Δ : F[𝑋 ] × F[𝑋 ] → [0, 1] and all 𝛿 > 0 consists of the
+an overview of its relevant properties below. For a given RS code           following:
+family RS[F, 𝐷, 𝜌] for which |𝐷 | = 𝑛 = 2𝑘 and rate 𝜌 = 2 −𝑅                    • Gen(1𝜆 ) → pp generates public parameters,
+for 𝑘, 𝑅 ∈ N. This implies that the degree bound 𝑑 is 2𝑘 −𝑅 . Fix               • Com : F<𝑑 [𝑋 ] → C commitment 𝑐 to some 𝑓 ,
+𝑟 ∈ [1, log 𝑑 = 𝑘 − 𝑅] to be the number of rounds in the protocol.              • An IOP system (𝑃, 𝑉 ) with 𝜖 (𝛿) soundness and 𝑘 (𝛿) rounds of
+For every 𝜂 ∈ (0, 1], let 𝐽𝜂 : [0, 1] → [0, 1] be the Johnson function             interaction for the relation R 𝛿 (pp) :=
+              √︁
+𝐽𝜂 (𝑥) = 1 − 1 − 𝑥 (1 − 𝜂). Given this parameter choice, FRI has                                                  ∃ 𝑔 ∈ F<𝑑 [𝑋 ], Δ(𝑓 , 𝑔) < 𝛿,
+                                                                                                                                                   !
+                                                                                                  𝑁
+                                                                               ⟨(𝑑, 𝑁 , {𝑧𝑖 , 𝑦𝑖 }𝑖=1, 𝑐); 𝑓 ⟩ ∀𝑖 ∈ [𝑁 ], 𝑔(𝑧𝑖 ) = 𝑦𝑖 , Com(𝑔) = 𝑐
+the following properties, where the asymptotics are given in terms
+of field operations over F:
+                                                                                   for which (𝑃, 𝑉 ) are both provided with degree bound 𝑑, and
+    (1) Prover Complexity: 𝑂 (𝑛)                                                                                               𝑁 and commitment
+                                                                                   a set of point-evaluation pairs {(𝑧𝑖 , 𝑦𝑖 )}𝑖=1
+    (2) Verifier Complexity: 𝑂 (log 𝑛)                                             𝑐 ∈ C, while 𝑃 is also provided with a representation of 𝑓 ∈
+    (3) Completeness: If 𝑓 ∈ RS[F, 𝐷, 𝜌] and the prover is honest,                 F[𝑋 ]. Both P and V have access to an oracle for Com(·).
+        then the verifier always accepts.
+                                                    [3/2]
+    (4) Soundness: If Δ(𝑓 , RS) = 𝛿 and 𝛿 ∈ (0, 𝐽𝜂        (1 − 𝜌)), then    4.2    Instantiation
+        ∀𝜂 ∈ (0, 1] the soundness error 𝜖 (𝛿) is bounded above by:          We assume existence of an IOPP protocol FRI in the sense of Def-
+              2 log |𝐷 |             n   o             𝑙                  inition 9, and specify the LPC routine below. More specifically,
+                        + 1 − min 𝛿 0, 𝛿 + 𝜂 log |𝐷 | ,                     since we are concerned with polynomial commitment schemes, we
+                𝜂 |F|
+                  3
+                                                                            present the scheme based on the existence of FRI (Theorem 2 in [3])
+        where 𝑙 the number of queries the verifier performs.
+                                                                            for the prime field RS code family 𝐶 = RS[F, 𝐷, 𝜌], where 𝜌 = 2 − R
+                                                                            for some R ∈ N, R > 2 and 𝜌 · |𝐷 | > 16. Note that we model the
+4     LIST POLYNOMIAL COMMITMENT
+                                                                            Com function as an oracle, so we do not deal with its security here.
+We start with the basic requirement for a commitment scheme to              In this case, we set the public parameters to be pp = (F, 𝐷):
+commit to elements of a given polynomial. This will be provided as              The oracle provided here is to 𝑓 | 𝐷 , which allows both parties to
+an oracle to the underlying gadget, and we assume it’s binding i.e.         simulate FRI over the coset domain 𝐷 by calculating the values of
+that the adversary will be able to fake commitments with negligible         𝑞| 𝐷 . This is since both parties explicitly construct the interpolation
+probability over the schemes security. A commitment scheme Σ =              polynomials and have access to 𝑓 | 𝐷 . Hence, the verifier is above to
+(Gen, Com, Open) is defined as follows:                                     check that 𝑐 = Com(𝑞) using oracle calls to 𝑓 | 𝐷 in order to simulate
+      • Gen(1𝜆 ) → pp generates public parameters,                          𝑞| 𝐷 . That the above satisfies the definition of an LPC scheme is
+RedShift: Transparent SNARKs from List Polynomial Commitments                                          CCS ’22, November 7–11, 2022, Los Angeles, CA, USA.
+
+
+Algorithm 1 LPC Routine                                                        Definition 11. A PPT algorithm D : F[𝑋 ] → (F×F) 𝜇 is called a
+ 1: procedure LPC(pp, 𝑑, 𝑁 , {𝑧𝑖 , 𝑦𝑖 }𝑖=1
+                                       𝑁 , 𝑐; 𝑓 )                           𝜇-dimensional 𝜖-list distinguisher for some metric Δ : F[𝑋 ] ×F[𝑋 ] →
+ 2:    P and V define the interpolation polynomial 𝑈 (𝑋 ) s.t.              [0, 1] if ∀𝑓 ∈ F[𝑋 ], 𝛿 > 0 the following hold with probability 1 −𝜖 (𝛿)
+                                                                            over the randomness of D:
+                         ∀𝑖 ∈ [𝑁 ], 𝑈 (𝑧𝑖 ) = 𝑦𝑖 .
+ 3:    P and V define the quotient polynomial                                      ∃𝑖 ∈ [𝜇], ∀𝑔 ∈ 𝐿𝛿 (𝑓 )\{𝑓 }, 𝑓 (D (𝑓 )𝑖,1 ) ≠ 𝑔(D (𝑓 )𝑖,1 ),
+                                   𝑓 (𝑋 ) − 𝑈 (𝑋 )
+                        𝑞 (𝑋 ) =                   .                                            ∀𝑖 ∈ [𝜇], 𝑓 (D (𝑓 )𝑖,1 ) = D (𝑓 )𝑖,2,
+                                   Π𝑖=1
+                                      𝑁 (𝑋 − 𝑧 )
+                                               𝑖
+ 4:    P and V return FRI(𝑞, RS(F, 𝐷, (𝑑 − 𝑁 )/|𝐷 | ) ).                    where D (𝑓 )𝑖,𝑗 the (𝑖, 𝑗)-th output element, 𝑖 ∈ [𝜇], 𝑗 ∈ {1, 2}.
+ 5: end procedure
+                                                                               Definition 12. An (𝜖, 𝑘, 𝜂)-polynomial evaluation scheme for
+                                                                            some metric Δ is a tuple Π = (D, Σ) where Σ = (𝑃, 𝑉 ) an (𝜖, 𝑘)-LPC
+immediate from the security properties of FRI. This is illustrated in       scheme and D an 𝜂-list distinguisher.
+the theorem below:
+                                                                               Theorem 5. For every 𝛿 > 0, an (𝜖, 𝑘, 𝜂)-polynomial evaluation
+    Theorem 4. The prime field RS[F, 𝐷, 𝜌] code family with rate 𝜌 =        scheme admits an IOP with soundness 𝜖 (𝛿) + 𝜂 (𝛿) and 𝑘 (𝛿) rounds
+2 − R , R ≥ 2, R ∈ N and |𝐷 | = 𝑛 has an (𝜖, 𝑘)-LPC over the Hamming        of interaction for the relation R :=
+distance Δ with 𝜖 = 𝜖FRI (𝛿) soundness and 𝑘 = 𝑘 FRI (𝛿) rounds of
+                                 √              [3/2]
+                                                                                                   𝑁
+                                                                               {⟨(𝑑, 𝑁 , {𝑧𝑖 , 𝑦𝑖 }𝑖=1 ), 𝑐; 𝑓 ⟩|∀𝑖 ∈ [𝑁 ], 𝑓 (𝑧𝑖 ) = 𝑦𝑖 , Com(𝑓 ) = 𝑐}.
+interaction for all 𝜈 ∈ (0, 1 − 𝜌), 𝛿 ∈ (0, 𝐽𝜈        (1 − 𝜌)), 𝑁 , 𝑑 ∈ N
+for which log (𝑛) − R = log (𝑑 − 𝑁 ) and 𝑑 − 𝑁 > 16. The LPC IOP               The above theorem relies on a simple observation: if we have
+admits inputs of size 𝑛 for which:                                          access to some distinguishing point-evaluation pair (𝑥, 𝑓 (𝑥)) such
+      • Prover Complexity: 𝑝 FRI (𝑛) + 𝑂 (𝑁 log3 𝑁 ),                       that 𝑓 (𝑥) ≠ 𝑔(𝑥) for all 𝑔 ∈ 𝐿𝛿 \{𝑓 }, then adding (𝑥, 𝑓 (𝑥)) to the
+      • Verifier Complexity: 𝑣 FRI (𝑛) + 𝑂 (𝑁 log3 𝑁 ),                     openings performed by the LPC means that only 𝑓 is a valid witness.
+where 𝑝 FRI (𝑛), 𝑣 FRI (𝑛) the FRI prover and verifier complexities on      This process is done once during the setup of the LPC scheme and
+input size 𝑛.                                                               each instantiation of an LPC that requires binding security can then
+                                                                            retrieve these points from the proving key.
+Remark 1: We note that the above scheme retains verifier succinct-
+ness when 𝑁 = 𝑂 (log 𝑑).                                                    4.3.1 Instantiation. We now provide two instantiations of the PES
+                                                                            based on different list distinguisher choices, and discuss the trade-
+4.3    Polynomial Commitments from LPCs                                     offs between the two.
+The scheme introduced above works fine when dealing with “wit-
+ness" polynomials 𝑤 (𝑋 ) within our proof system, since we only             List Decodability: The most obvious way to construct a distin-
+require the existence (and not uniqueness) of such a polynomial.            guisher D is by using a list-decoding algorithm for the given code
+However, extra care should be taken outside of this regime, when            to enumerate all 𝑔 ∈ 𝐿𝛿 (𝑓 ). By sampling random values 𝑟 ∈ F
+working with “setup" polynomials 𝑐 (𝑋 ) encoding the constraint             and checking the required relation, this algorithm can be used to
+system itself. In this case, we want to ensure that the openings pro-       construct D with no soundness error but high time complexity.
+vided by the prover are indeed the evaluations of the polynomial            Indeed, for 𝛿 < 1 − (𝑑 − 𝑁 − 𝜇)/|𝐷 | the algorithm takes 𝑂 (|𝐷 | 3 )
+𝑐 (𝑋 ) itself and not of some polynomial 𝑔 ∈ 𝐿𝛿 (𝑐). The verifier can       time, while in the case of equality between the two this can go up
+evaluate setup polynomial values themselves. However, this doesn’t          to 𝑂 (|𝐷 | 15 )!
+retain succinctness as evaluations require 𝑂 (𝑑) computations.
+    We leverage the fact that for a given setup polynomial 𝑐 (𝑋 )           Random Sampling: Due to the above efficiency considerations, we
+the list 𝐿𝛿 (𝑐) is computable by both the prover and verifier. They         opt to add some soundness error to the distinguisher in exchange for
+can hence find a distinguishing point 𝑖 at which 𝑐 (𝑖) differs from         a large increase in the efficiency of the protocol. We construct the
+the evaluations of all other polynomials 𝑔 ∈ 𝐿𝛿 (𝑐). This is naively        distinguisher by sampling 𝜇 random points and simply returning
+achieved by using a list-decoding algorithm at the beginning to find        them along with their evaluations. Due to the Schwartz-Zippel
+all 𝑔 ∈ 𝐿𝛿 (𝑐) and then pick 𝑖 ∈ F at random until 𝑐 (𝑖) ≠ 𝑔(𝑖) ∀ 𝑔 ∈       lemma, there is a high chance that the random points will indeed
+𝐿𝛿 (𝑐). This, however, has overhead polynomial in |𝐷 |.                     separate 𝑓 from its corresponding 𝛿-list. This takes time 𝑂 (𝜇 · 𝑑)
+    The key to our approach is that the procedure of enumerating all        which, although linear with respect to 𝑑, is substantially faster than
+such elements and picking a suitable candidate is (1) fully transpar-       list-decoding when 𝑑 ∼ |𝐷 |.
+ent, and (2) executed and verified only once for every circuit. We
+                                                                              Claim 1. The random sampling algorithm defines an 𝜂-list distin-
+thus add an offline phase that is performed only once at the begin-
+                                                                            guisher D taking time 𝑂 (𝜇 · 𝑑) with soundness error:
+ning of the protocol. The task of the offline phase is to search for
+such a distinguishing point 𝑖. This allows us to strengthen the proof                                        
+                                                                                                                 𝑑 · (|𝐿𝛿 | − 1) 𝜇
+                                                                                                                                
+of knowledge guarantee for the LPC to imply that all evaluations                                   𝜂 (𝛿) =                         .
+                                                                                                                       |F|
+come from the specific polynomial 𝑐 (𝑋 ). Note that this is equivalent
+to the general proof of knowledge guarantee provided by polyno-                We can use the LPC scheme constructed in the previous sec-
+mial commitment schemes. This preprocess phase is analogous to              tion along with the distinguisher defined above to put everything
+the work of the indexer in [19].                                            together in the following theorem.
+CCS ’22, November 7–11, 2022, Los Angeles, CA, USA.                                                    Assimakis A. Kattis, Konstantin Panarin, and Alexander Vlasov
+
+                                                                                                                                                          
+   Theorem 6. The prime field RS[F, 𝐷, 𝜌] code family with rate                   all 𝑙 ∈ [𝑘𝑛], the sequences 𝑓 (1) , . . . , 𝑓 (𝑘𝑛) , ℎ (1) , . . . , ℎ (𝑘𝑛) ∈ F𝑘𝑛 ,
+𝜌 = 2 − R , R ≥ 2, R ∈ N and |𝐷 | = 𝑛 has an (𝜖, 𝑘, 𝜂)-PES Π = (D, Σ)             defined as:
+over the Hamming distance Δ.
+   Σ is an (𝜖, 𝑘)-LPC scheme with 𝜖 = 𝜖FRI (𝛿) soundness and 𝑘 =                               𝑓 ( ( 𝑗 −1) ·𝑛+𝑖 ) := 𝑓 𝑗 (𝑔𝑖 ), ℎ ( ( 𝑗 −1) ·𝑛+𝑖 ) := ℎ 𝑗 (𝑔𝑖 ),
+                                               √             [3/2]                for each 𝑗 ∈ [𝑘], 𝑖 ∈ [𝑛], satisfy ℎ (𝑙 ) = 𝑓 (𝜎 (𝑙 ) ) .
+𝑘 FRI (𝛿) rounds of interaction for 𝜈 ∈ (0, 1 − 𝜌), 𝛿 ∈ (0, 𝐽𝜈     (1 −
+𝜌)), 𝑁 , 𝑑, 𝜇 ∈ N for which log (𝑛) − R = log (𝑑 − 𝑁 − 𝜇) and 𝑑 −                    Definition 15. Let T = {𝑇𝑖 }𝑠𝑖=1 be a partition of [𝑘𝑛] into 𝑠
+𝑁 − 𝜇 > 16. Σ also admits inputs of size 𝑛 for which:
+                                                                                  disjoint blocks, where 𝑘, 𝑛, 𝑠 ∈ N. We say that {𝑓𝑖 }𝑘𝑖=1 ∈ F[𝑋 ] copy-
+     • Prover Complexity: 𝑝 FRI (𝑛) + 𝑂 ((𝑁 + 𝜇) log3 (𝑁 + 𝜇)),                   satisfies T if, when defining (𝑓 (1) , . . . , 𝑓 (𝑘𝑛) ) ∈ F𝑘𝑛 as above, we
+     • Verifier Complexity: 𝑣 FRI (𝑛) + 𝑂 ((𝑁 + 𝜇) log3 (𝑁 + 𝜇)),                 have 𝑓 (𝑙 ) = 𝑓 (𝑙 ′ ) whenever ∃𝑖 s.t. 𝑙, 𝑙 ′ ∈ 𝑇𝑖 .
+where 𝑝 FRI (𝑛), 𝑣 FRI (𝑛) the FRI prover and verifier complexities on
+                                                                                     We define a permutation 𝜎 (T ) on [𝑘𝑛] such that for each block
+input size 𝑛.
+                                                                                  𝑇𝑖 of T , 𝜎 (T ) contains a cycle only going over all the elements
+   D is a 𝜇-dimensional 𝜂-list distinguiser for the RS[F, 𝐷, 𝜌] code
+                                                                                  of 𝑇𝑖 . Many possibilities exist: for example, we can rearrange ele-
+family taking 𝑂 (𝜇 · 𝑑) and soundness error:
+                                                𝜇                               ments in the cycles corresponding to 𝑇𝑖 , or 𝜎 (T ) can be chosen
+                                  𝑑                                               arbitrarily from the set of all valid permutations. It is simple to
+                       𝜂 (𝛿) =       · (𝐽𝜌,𝜈 − 1) .
+                                 |F|                                              check that (𝑓1, . . . , 𝑓𝑘 ) copy-satisfies T if and only if (𝑓1, . . . , 𝑓𝑘 ) =
+                                                                                  𝜎 (𝑓1, . . . , 𝑓𝑘 ). We can thus equivalently say that (𝑓1, . . . , 𝑓𝑘 ) copy-
+   This provides the proof of knowledge guarantees needed for
+                                                                                  satisfy 𝜎.
+setup polynomials through direct application of Theorem 5.
+                                                                                     Definition 16. Fix domain 𝐷 ∗ and size parameter 𝑛 ∈ N. The
+5    REDSHIFT                                                                     constraint system L ′ is defined as follows:
+We follow the language and notation of PLONK [23].                                                       L ′ := (qL, qR , qO, qM, qC, 𝜎, 𝑛),
+  Definition 13 (PLONK Constraint System). L = (V, Q) is a                        where:
+constraint system with 𝑛 gates and 𝑚 wires for which 𝑛 ≤ 𝑚 ≤ 2𝑛                      • qL, qR , qO, qM, qC ∈ F[𝑋 ] the selector polynomials,
+and where:                                                                           • 𝜎 : [3𝑛] → [3𝑛] a permutation over 3𝑛 elements.
+     • V is of the form V = (a, b, c), where a, b, c ∈ [𝑚]𝑛 ,                       The relation R L ′ for L ′ is defined as the set
+     • Q is of the form                                                               (𝑥, 𝜔) := (PI(𝑋 ), ⟨fL (𝑋 ), fR (𝑋 ), fO (𝑋 )⟩) ∈ F[𝑋 ] × (F[𝑋 ]) 3,
+                   Q = (qL, qR , qO, qM, qC ) ∈ (F𝑛 ) 5,                          with the following properties:
+        where qL, qR , qO, qM, qC are the “selector" vectors.                        (1) fL (𝑋 ), fR (𝑋 ), fO (𝑋 ) copy-satisfy 𝜎.
+                                                                                     (2) ∀𝑎 ∈ 𝐷 ∗ it holds that:
+    Moreover, x ∈ F𝑚 is said to satisfy L if ∀𝑖 ∈ [𝑛]:
+                                                                                         qL · fL + qR · fR + qO · fO + qM · fL · fR + (qC + PI) = 0.
+                 (qL )𝑖 · xa𝑖 + (qR )𝑖 · xb𝑖 + (qO )𝑖 · xc𝑖 +
+                                                                                    For completeness we also provide a formal statement of the
+                    +(qM )𝑖 · (xa𝑖 · xb𝑖 ) + (qC )𝑖 = 0.                          equivalence between the two constraint systems, whose proof can
+   To define a relation based on L, we extend it to include a positive            be found in the appendix. PI(𝑋 ) is the public input polynomial
+integer 𝑙 ≤ 𝑚, and subset 𝐼 = [𝑙] ⊆ [𝑚] of “public inputs”. We can                and encodes public data that is used to define the predicate of
+naturally set R L as the set of pairs (𝑥, 𝜔) with 𝑥 ∈ F𝑙 , 𝜔 ∈ F𝑚−𝑙               choice, while fL (𝑋 ), fR (𝑋 ), fO (𝑋 ) are the left, right and output wire
+such that x := (𝑥, 𝜔) satisfies L. We say L is ‘prepared’ for 𝑙 public            polynomials respectively and encode prover-only private data.
+inputs if ∀𝑖 ∈ [𝑙]:                                                                 Lemma 1. The constraint systems proposed in Definition 13 and
+       ai = 𝑖, (qL )𝑖 = 1, (qM )𝑖 = (qR )𝑖 = (qO )𝑖 = (qC )𝑖 = 0.                 Definition 16 are equivalent.
+                                                                                  Remark: Note that the degrees of fL, fR , fC are 𝑛 − 1, where 𝑛 is
+From here on, we will assume that the constraint system is given
+                                                                                  the size of L. However in RedShift this is relaxed to some degree
+in prepared form.
+                                                                                  𝑘 > 𝑛 to attain zero-knowledge.
+   In order to reformulate this constraint system in polynomial
+terms, we require some additional ingredients. Let 𝑔 ∈ F∗ be an
+element of order 𝑛 + 1, 𝐷 = ⟨𝑔⟩ ⊆ F∗ the cyclic subgroup generated
+                                                                                  5.1     Protocol Instantiation
+by 𝑔, and 𝐷 ∗ := 𝐷/{𝑒} where 𝑒 = 𝑔0 the identity. For 𝑖 ∈ [𝑛 + 1],                Let L ′ = (qL, qR , qO, qM, qC, 𝜎, 𝑛) be the constraint system in ques-
+denote by 𝐿𝑖 (𝑋 ) the element of F ≤𝑛 [𝑋 ] with 𝐿𝑖 (𝑔𝑖 ) = 1 and 𝐿𝑖 (𝑎) =         tion. Define 𝑘 1, 𝑘 2, 𝑘 3 ∈ F∗ to be representations of different cosets
+0 for all 𝑎 ∈ 𝐷 different to 𝑔𝑖 . By construction, {𝐿𝑖 (𝑋 )}𝑛+1                   in F∗ \𝐷, with 𝑘 1 = 𝑒 set as the identity. Let 𝜏 be the bijection
+                                                               𝑖=1 form
+                                                      Î
+a Lagrange basis for 𝐷. Finally, we set 𝑍 (𝑋 ) := 𝑎∈𝐷 ∗ (𝑋 − 𝑎) ∈                 between the sets 𝑃1 = [3𝑛] and 𝑃2 = 𝐷 ∗ ∪ 𝑘 2 𝐷 ∗ ∪ 𝑘 3 𝐷 ∗ defined by:
+F ≤𝑛 [𝑋 ] to be a domain polynomial for 𝐷 ∗ , i.e. zero only on 𝐷 ∗ .                          𝜏 [𝑛 · ( 𝑗 − 1) + 𝑖] = 𝑘 𝑗 𝑔𝑖 , 𝑖 ∈ [𝑛], 𝑗 ∈ [3].
+   Definition 14 (Domain Permutations). For sets of 𝑘 poly-                       Since 𝜎 is a permutation on 𝑃1 , 𝜎 ′ = 𝜏 ◦ 𝜎 ◦ 𝜏 −1 is a permutation
+                                                                                                             3 , {𝑆 (𝑋 )} 3 each of degree at most 𝑛
+                                                                                  on 𝑃 2 . Define {𝑆𝑖𝑑𝑖 (𝑋 )}𝑖=1
+nomials {𝑓𝑖 }𝑘𝑖=1, {ℎ𝑖 }𝑘𝑖=1 for which ℎ𝑖 , 𝑓𝑖 ∈ F[𝑋 ] and permutation                                             𝜎𝑗     𝑗=1
+𝜎 : [𝑘𝑛] → [𝑘𝑛], we say that the set (ℎ 1, ..., ℎ𝑘 ) = 𝜎 (𝑓1, ..., 𝑓𝑘 ) if, for   as the set of permutation polynomials as follows:
+RedShift: Transparent SNARKs from List Polynomial Commitments                                                     CCS ’22, November 7–11, 2022, Los Angeles, CA, USA.
+
+
+   (1) 𝑆𝑖𝑑 𝑗 (𝑋 ) = 𝑘 𝑗 𝑋 for 𝑗 ∈ [3],                                            Algorithm 2 RedShift Routine
+   (2) 𝑆𝜎 𝑗 (𝑔𝑖 ) = 𝜎 ′ (𝑘 𝑗 𝑔𝑖 ) for 𝑖 ∈ [𝑛], 𝑗 ∈ [3].                            1: procedure RedShift(pp, PI, 𝑛, 𝑘, 𝑁 ; fL , fR , fO )
+                                                                                   2:    P chooses masking polynomials ℎ 1 , ℎ 2 , ℎ 3 ∈𝑅 F<𝑘 [𝑋 ].
+                                                                                   3:    P defines masking witness polynomials:
+These will be used as part of the setup polynomials to define the                                         𝑓1 (𝑋 ) := fL (𝑋 ) + ℎ 1 (𝑋 )𝑍 (𝑋 ),
+problem instance.
+                                                                                                       𝑓2 (𝑋 ) := fR (𝑋 ) + ℎ 2 (𝑋 )𝑍 (𝑋 ),
+                                                                                                       𝑓3 (𝑋 ) := fO (𝑋 ) + ℎ 3 (𝑋 )𝑍 (𝑋 ),
+Setup & Witness Polynomials: We can now draw the link be-
+tween the “setup” and “witness” polynomials of the previous sec-                           and sends commitments cm𝑖 , 𝑖 ∈ [3] for them to V.
+                                                                                   4: V sends random 𝛽, 𝛾 ∈ F to P.
+tions with their concrete definitions in the instantiation of Red-
+                                                                                   5: For 𝑗 ∈ [3], P computes
+Shift. The selector polynomials qL, qR , qO, qM, qC , permutation
+polynomials {𝑆𝑖𝑑𝑖 }𝑖 ∈ [3] , {𝑆𝜎 𝑗 } 𝑗 ∈ [3] and Lagrange-basis polynomi-                       𝑝 𝑗 := 𝑓 𝑗 + 𝛽 · 𝑆𝑖𝑑 𝑗 + 𝛾 and 𝑞 𝑗 = 𝑓 𝑗 + 𝛽 · 𝑆𝜎 𝑗 + 𝛾 .
+als {𝐿𝑖 }𝑖 ∈ [𝑛+1] play the role of “setup" polynomials. Moreover, the                P then defines 𝑝 ′ (𝑋 ) and 𝑞 ′ (𝑋 ) by:
+wire polynomials fL, fR , fO form the set of “witness” polynomials.
+                                                                                                            Ö                         Ö
+                                                                                                 𝑝 ′ (𝑋 ) =      𝑝 𝑗 (𝑋 ), 𝑞 ′ (𝑋 ) =   𝑞 𝑗 (𝑋 ).
+This choice makes intuitive sense: the former fully specify the rela-                                          𝑗 ∈ [3]                           𝑗 ∈ [3]
+tion in question and hence need to be unique in order to prevent                   6: P computes 𝑃, 𝑄 ∈ F<𝑛+1 [𝑋 ] such that 𝑃 (𝑔) = 𝑄 (𝑔) = 1 and for
+malleability in the proof of knowledge guarantees. The latter (which                  𝑖 ∈ [𝑛 + 1]\{1}:
+tend to be much larger in most practical deployments) however, do                                               Ö                                 Ö
+                                                                                                  𝑃 (𝑔𝑖 ) =              𝑝 ′ (𝑔 𝑗 ), 𝑄 (𝑔𝑖 ) =             𝑞 ′ (𝑔 𝑗 ),
+not require uniqueness guarantees.                                                                             1≤ 𝑗 <𝑖                           1≤ 𝑗 <𝑖
+   We are now ready to specify the RedShift protocol. At the inter-
+                                                                                           and sends commitments cm4 , cm5 of 𝑃 and 𝑄 to V.
+active level, it is most similar to the DEEP-ALI protocol, but for the             7: V sends random 𝑎 1 , . . . , 𝑎 6 ∈ F to P.
+PLONK constraint system. We instantiate the distinguisher oracle                   8: P defines the following polynomials:
+O D queries as evaluations by an indexer algorithm I that receives                    • 𝐹 1 (𝑋 ) = 𝐿1 (𝑋 ) (𝑃 (𝑋 ) − 1)
+a low-degree polynomial input 𝑓 and outputs 𝜇 separation points                       • 𝐹 2 (𝑋 ) = 𝐿1 (𝑋 ) (𝑄 (𝑋 ) − 1)
+                                                                                      • 𝐹 3 (𝑋 ) = 𝑃 (𝑋 )𝑝 ′ (𝑋 ) − 𝑃 (𝑋 · 𝑔)
+                                                𝜇
+along with their evaluations {𝑥𝑖 , 𝑓 (𝑥𝑖 )}𝑖=1 . We can implement the
+random sampling distinguisher in the non-interactive setting using                    • 𝐹 4 (𝑋 ) = 𝑄 (𝑋 )𝑞 ′ (𝑋 ) − 𝑄 (𝑋 · 𝑔)
+𝑛𝑐 · 𝜇 · 𝑛 queries (where 𝑛𝑐 the number of constraint polynomials),                   • 𝐹 5 (𝑋 ) = 𝐿𝑛 (𝑋 ) (𝑃 (𝑋 · 𝑔) − 𝑄 (𝑋 · 𝑔) )
+and provide the set of points as input to the IOP for the PLONK                       • 𝐹 6 (𝑋 ) = qL (𝑋 ) 𝑓𝐿 (𝑋 ) + qR (𝑋 ) 𝑓𝑅 (𝑋 ) + qO (𝑋 ) 𝑓𝑂 (𝑋 ) +
+                                                                                         qM (𝑋 ) 𝑓𝐿 (𝑋 ) 𝑓𝑅 (𝑋 ) + (qC (𝑋 ) + PI(𝑋 ) )
+proof system (c.f. Section 7 in [23]).                                                                Í6
+                                                                                   9: P defines 𝐹 = 𝑖=1     𝑎𝑖 𝐹𝑖 and computes 𝑇 (𝑋 ) = 𝐹 (𝑋 )/𝑍 (𝑋 ), sending
+   In the interests of modularity and ease of exposition, we make                     V a commitment cm6 to 𝑇 .
+use of an (𝜖, 𝑘)-list polynomial commitment scheme 𝐿𝑃𝐶 while sim-                 10: V sends P a random evaluation point 𝑦𝑚 ∈ F\𝐷, 𝑚 ∈ [𝑁 ].
+ulating an (𝜖, 𝑘, 𝜂)-polynomial evaluation scheme 𝑃𝐸𝑆 = (D, 𝐿𝑃𝐶)                  11: P responds with 𝑁 sets of points, where 𝑚 ∈ [𝑁 ]:
+with access to a 𝜇-dimensional 𝜂-distinguisher D. The idea is to                                                          3                  3                 3
+                                                                                   𝑇 (𝑦𝑚 ), 𝑃 (𝑦𝑚 ), 𝑄 (𝑦𝑚 ), { 𝑓𝑖 (𝑦𝑚 ) }𝑖=1 , {𝑆𝑖𝑑𝑖 (𝑦𝑚 ) }𝑖=1 , {𝑆𝜎𝑖 (𝑦𝑚 ) }𝑖=1 ,
+replace all instances of commitment to some low-degree polyno-
+mial, which is required for the knowledge soundness guarantees of                     and qj (𝑦𝑚 ) for j ∈ {L, R, O, M, C} := J.
+                                                                                  12: P and V engage in sub-protocols, outputting 0 if any fail:
+the proof system, to commitment using the LPC and PES schemes
+above. These will be implemented using the FRI protocol, but at the                       PES(pp, 𝑛 + 1, 𝑁 , { (𝑦𝑚 , qj (𝑦𝑚 ) ) }𝑚∈ [𝑁 ] , cmqj ; qj ), j ∈ J,
+maximal levels of 𝛿 in order to achieve improvements in proof size.                   PES(pp, 𝑛 + 1, 𝑁 , { (𝑦𝑚 , 𝑆𝑖𝑑 𝑗 (𝑦𝑚 ) ) }𝑚∈ [𝑁 ] , cmidj ; 𝑆𝑖𝑑 𝑗 ), 𝑗 ∈ [3],
+We identify two types of polynomials with differing knowledge                          PES(pp, 𝑛 + 1, 𝑁 , { (𝑦𝑚 , 𝑆𝜎 𝑗 (𝑦𝑚 ) ) }𝑙 ∈ [𝑁 ] , cm𝜎j ; 𝑆𝜎 𝑗 ), 𝑗 ∈ [3],
+guarantee requirements. These are the witness and setup polyno-                          LPC(pp, 𝑛 + 1, 𝑁 , { (𝑦𝑚 , 𝑓𝑖 (𝑦𝑚 ) ) }𝑚∈ [𝑁 ] , cmi ; 𝑓𝑖 ), 𝑖 ∈ [3],
+mials mentioned above. In the first, we only require the existence                LPC(pp, 𝑛 + 1, 2𝑁 , { (𝑦𝑚 , 𝑃 (𝑦𝑚 ) ), (𝑦𝑚 · 𝑔, 𝑃 (𝑦𝑚 · 𝑔) ) }𝑚∈ [𝑁 ] , cm4 ; 𝑃 ),
+of some low degree polynomial to exist, while in the latter the
+                                                                                  LPC(pp, 𝑛 + 1, 2𝑁 , { (𝑦𝑚 , 𝑄 (𝑦𝑚 ) ), (𝑦𝑚 · 𝑔, 𝑄 (𝑦𝑚 · 𝑔) }𝑚∈ [𝑁 ] , cm5 ; 𝑄 ),
+prover needs to know the specific polynomial they are providing
+                                                                                             LPC(pp, 3𝑛 + 1, 𝑁 , { (𝑦𝑚 ,𝑇 (𝑦𝑚 ) ) }𝑚∈ [𝑁 ] , cm6 ;𝑇 ).
+commitments to.
+                                                                                  13: Using the queried values above, ∀𝑚 ∈ [𝑁 ] V computes {𝐹𝑖 (𝑦𝑚 ) }𝑖 ∈ [6] ,
+   In the construction below, we assume that {𝑆𝑖𝑑𝑖 }𝑖 ∈ [3] , {𝑆𝜎 𝑗 } 𝑗 ∈ [3] ,
+                                                                                      outputting 1 if the following holds:
+{𝐿𝑖 }𝑖 ∈ [𝑛+1] , qL, qR , qO, qM, qC ∈ pp, have been precomputed over
+                                                                                                         6
+𝐷 ∗ and can be instantaneously accessed through commitments                                             ∑︁
+                                                                                                               𝑎𝑖 𝐹𝑖 (𝑦𝑚 ) = 𝑍 (𝑦𝑚 )𝑇 (𝑦𝑚 ).
+provided by an oracle along with a representation of the public                                          𝑖=1
+input polynomial PI(𝑋 ) given to the verifier. To highlight the above             14: end procedure
+difference, we explicitly instantiate the commitments that need to
+be sent at each step and show how these are used in the PES and
+LPC schemes. In the IOP formalism, this is equivalent to sending                  for checking the copy-satisfiability of the witness polynomials. This
+the respective polynomials to a trusted intermediary I.                           is directly equivalent to the completeness argument in PLONK.
+   Completeness holds because for honest provers the 𝐹𝑖 are iden-                    We also briefly explain the intuition behind the 𝑆𝑖𝑑 𝑗 and 𝑆𝜎 𝑗
+tically zero on domain 𝐷 ∗ , which means that all the 𝐹𝑖 (𝑋 ) are                 polynomials: 𝑆𝑖𝑑 𝑗 is only required to map 𝐷 to the disjoint sets
+divisible by 𝑍 (𝑋 ) in the ring F[𝑋 ], hence so is their linear combina-          𝑃1, 𝑃2, 𝑃3 . 𝑆𝜎 𝑗 should then map to the same set 𝑃 = 𝑃 1 ∪ 𝑃 2 ∪ 𝑃 3 but
+                 Í6
+tion 𝐹 (𝑋 ) = 𝑖=1      𝑎𝑖 𝐹𝑖 (𝑋 ). Note that the {𝐹𝑖 }𝑖 ∈ [5] are responsible     in a “permuted” fashion. We construct a map 𝜏 for permutation 𝜎
+CCS ’22, November 7–11, 2022, Los Angeles, CA, USA.                                                  Assimakis A. Kattis, Konstantin Panarin, and Alexander Vlasov
+
+
+from domain [𝑛] to 𝑃. The simplest way to define 𝑆𝑖𝑑𝑘 is to map [𝑛]              polynomials. In the syntax of Theorem 1, a choice of 𝜈 = |F| −1/20
+to [1, ..., 𝑛], [𝑛 + 1, ..., 2𝑛], [2𝑛 + 1, ..., 3𝑛] respectively, in this case   provides a list size of 12 |F| 1/20 𝜌 −1/2 . For our choice of field size,
+there is no need to apply the map 𝜏 as then there is no need for                 this yields an error contribution on the order of 2 −128 . Now we
+domain translation (𝑃 = [𝑛]). The problem is that all of the 𝑆𝑖𝑑 𝑗               focus on how such a choice of 𝜈 ≠ 0 will affect the soundness of
+polynomials will be of degree 𝑛 in general. We construct 𝑆𝑖𝑑 𝑗 so as             FRI. By picking 𝜌 = 1/16 we get the following contribution to the
+to be of minimal possible degree 1, so it is easy for the verifier to                                              [3/2]
+                                                                                 FRI soundness error for 𝛿 < 𝐽𝜈          (1 − 𝜌):
+calculate evaluations of those polynomials by themselves without                                              n                    o            
+                                                                                                                       [3/2]
+requiring the usage of the (more expensive) evaluation procedures.                       𝑝 (𝜈, 𝜌) = 1 − min 𝛿 0, 𝐽𝜈          (1 − 𝜌) + 𝜈 log |𝐷 | .
+This optimization is taken from [23].
+                                                                                 A smaller such value allows for fewer queries for a given level
+   We opt for sampling 𝑦 outside of the domain 𝐷 in order to achieve
+                                                                                 of soundness, shrinking proof size in the non-interactive setting.
+perfect-zero knowledge guarantees instead of statistical. 𝑁 here
+                                                                                 In the case of 𝜈 = 0, we have 𝑝 (0, 1/16) = 1/2. For domain size
+denotes the number of random challenge points sampled and is set
+                                                                                 |𝐷 | = 232 (which equates to a degree bound 𝑑 = 𝜌 |𝐷 | = 𝑛 +
+to 𝑁 = 1 for our implementation. Finally, due to the restrictions
+                                                                                 1 = 228 ) we have that 𝑝 (|F| −1/20, 1/16) ∼ 0.504. For comparison
+on the degree it may be necessary to split 𝑇 into separate poly-
+                                                                                 purposes, if we instead use 𝜌 = 1/32 we get 𝑝 (0, 1/32) ∼ 0.421 and
+nomials {𝑇0,𝑇1,𝑇2 } and commit to them independently. This and
+                                                                                 𝑝 (|F| −1/20, 1/32) ∼ 0.425.
+other optimizations are further discussed in the appendix, as is the
+                                                                                    We are now ready to look at the effect of changing 𝛿 on the total
+formal analysis of the security and zero-knowledge properties of
+                                                                                 number of queries required to achieve a constant security level
+the protocol. We end with a formal statement capturing the security
+                                                                                 for the overall protocol. We fix a rate of 𝜌 = 1/64 with 𝜈 = 0 for
+properties of RedShift.
+                                                                                 simplicity and provide the total query number required to achieve
+   Theorem 7. The prime field RS[F, 𝐷, 𝜌] code family with rate                  an 80 bit security level for three regimes for 𝛿: (1) unique decoding
+𝜌 = 2 − R , R ≥ 2, R ∈ N and 𝜌 |𝐷 | = 𝑛 + 1 admits an IOP for the                radius 𝛿 = 𝛿 0 , (2) 𝛿 within the ‘one-and-a-half’ Johnson bound
+constraint system S described in Definition 13, where 𝑛 the size of the          (used in FRI [10]), and (3) 𝛿 within the Johnson bound (used in
+instance in S and 𝑁 a repetition parameter. This IOP achieves perfect            DEEP-FRI [9]). Note that (1) denotes the worst-case error and is
+                                                             √
+completeness, perfect zero-knowledge, and ∀𝜈 ∈ (0, 1 − 𝜌), 𝛿 ∈                   provided as a reference for the relative efficiency of the two LPC
+     [3/2]                                                                       instantiations. We note a 51% reduction in the query number at
+(0, 𝐽𝜈   (1 − 𝜌)) has round-by-round knowledge soundness:
+                                                                               this security level in using FRI, while DEEP-FRI achieves a 67%
+                                1                                  4𝑛            reduction at rate 𝜌 = 1/64. As rate increases, this improvement is
+                         𝑁
+ 𝜖𝜋 (𝛿) ≤ max 𝜖FRI (𝛿), 𝜖IOP ,       , where 𝜖IOP := (𝐽𝜌,𝜈 ) 6 ·        .
+                               |F|                               |F\𝐷 |          less pronounced; however, we still get a 32% and 55% improvement
+   The above IOP is instantiated as a Non-Interactive Random Or-                 in query complexity for the two respective instantiations even at
+acle Proof (NIROP) using the “CS-proof” technique to compile                     𝜌 = 1/16. This demonstrates concrete efficiency improvements to
+the oracles to the constraint functions. More specifically, this as-             the underlying proof even with small rate deviations.
+sumes the existence of a Random Oracle (RO) for the hash function                   Subsequent work [5] has demonstrated that for FRI instances
+H : F × F → F [7] and constructs Com(𝑓 ) as the root 𝑐 of a Merkle               over large fields we can do strictly better. If 𝑞 > |𝐷 | 2 , the maximal
+tree where the leaves form the evaluations of 𝑓 on 𝐷. The RO is                  𝛿 for which FRI is sound is actually equal to the Johnson bound
+                                                                                                        [3/2]
+not required, as correlation-intractable hash functions have been                𝐽𝜈 (1 − 𝜌) instead of 𝐽𝜈     (1 − 𝜌). In practice, this gives us the same
+shown to suffice (see [16]). In the non-interactive setting, the prover          soundness error for FRI and DEEP-FRI since the number of queries
+will provide the verifier with a Merkle authentication path to some              performed dominates the error contribution. Finally, by assuming
+𝑓 (𝑖) upon a query for 𝑖 ∈ 𝐷 to the oracle for 𝑓 . Note that this adds           Conjecture 1 we can do even better: 𝛿 is pushed beyond the John-
+log |𝐷 | overhead to the protocol for each query.                                son bound to 1 − 𝜌 and, due to the constant list size assumption,
+                                                                                 the soundness of FRI and DEEP-FRI persists in this larger range.
+6    SYSTEM INSTANTIATION                                                        Note, however, that going beyond the Johnson bound comes with a
+The various components of RedShift can now be put together in                    loss of knowledge security: we cannot use the Sudan list-decoding
+order to arrive at security guarantees of a functional implementa-               algorithm to extract a witness, so any knowledge claim would have
+tion. By modularity of the above approach, it is possible to analyze             to be non-extractable in this setting.
+the security guarantees of the system based on different choices
+for the rate, distinguisher, and LPC scheme. The starting point for                         Table 1: LPC Instantiation Comparisons.
+this is the soundness bound of Theorem 7. Since this depends on
+the list decodability of the RS codes, the analysis can be split into                                                           𝑝 Bound      Query Number
+                                                                                            Method               𝛿 Bound
+two axes: based on Theorem 1 and on Conjecture 1, each of which                                                                 (𝜈 = 0)     1/64 1/32 1/16
+gives different bounds on protocol soundness. We analyze the above                    Unique Decoding           (1 − 𝜌 )/2     (1 + 𝜌 )/2    82    84     88
+based on a changing rate parameter 𝜌 at a given security level, and                                            [3/2]              √3
+                                                                                           FRI [10]         𝐽𝜈      (1 − 𝜌 )         𝜌       40    48     60
+look the total number of queries that need to be executed by the                                                                  √
+                                                                                    FRI with 𝑞 > |𝐷 | 2 [5]    𝐽𝜈 (1 − 𝜌 )          𝜌        27    32     40
+FRI protocol to achieve this. In the analysis below, we work with a                                                               √
+                                                                                        DEEP-FRI [9]           𝐽𝜈 (1 − 𝜌 )          𝜌        27    32     40
+field of size log |F| = 256 bits and aim for 80 bit security. First we
+                                                             8     4𝑛               FRI with Conjecture 1         1−𝜌              𝜌         14    16     20
+focus on the contribution from the list-decoding bound: 𝐽𝜌,𝜈     |F/𝐷 | :
+note the exponent of 8 instead of 6 due to splitting 𝑇 into 3 smaller
+RedShift: Transparent SNARKs from List Polynomial Commitments                                         CCS ’22, November 7–11, 2022, Los Angeles, CA, USA.
+
+
+7    RESULTS                                                             number of queries verified, so any corresponding improvements to
+We instantiate RedShift with 𝑟 = 576460752303423505, 𝑞 = 𝑟 ·2192 +       proof sizes will affect verification proportionately.
+1 which is a Proth prime and use 𝜌 = 1/16. Oracles were instantiated        The data clearly shows a logarithmic relationship between proof
+as Merkle trees using the Blake2s hashing algorithm. The PES             and predicate sizes, which is the biggest drawback of the current
+was instantiated using the random sampling approach, where a             scheme. To this end, we propose optimizations (specified in Appen-
+random point was sampled using Fiat-Shamir: i.e. by placing all          dix F) of how the Merkle tree represents data and query calls to
+individual root hashes of the oracles to the setup polynomials into      decrease proof size (and verification times) by about two orders of
+the transcript. Circuit sizes were chosen so as to set 𝑛 + 1 = 2𝑘        magnitude (∼ 4×). In this case, projected proof sizes are still larger
+which, in the case of RedShift, implies a degree bound 𝑑 = 𝑛 + 1 for     (∼ 300kB) than those of both Aurora and Fractal (∼ 150kB) for
+FRI. All implementations use a certain degree of precomputation:         a circuit of 220 gates at 128-bit security but comparable to Virgo
+we precompute the low degree extensions of setup polynomials             (∼ 200kB) at 100-bit security. Note that this issue is specific to trans-
+and the Merkle trees of the setup polynomial oracles.                    parent systems: trusted proof systems like [28] have size < 1kB
+   The soundness error due to FRI depends on the total number of         proofs for all circuits.
+queries performed. This does not change the proof generation time
+and only affects proof size and verification. We follow the approach
+in Section 6 in order to set these parameters, targeting an 80-bit                             Table 2: Projected Proof Sizes.
+security level. We note that the final soundness error is dominated
+by the FRI error, while the size contribution is dominated by the            Security     Rate    Circuit Size             Proof Size (KB)
+total number of queries performed. We used an Apple MacBook                   (Bits)    (-log 𝜌 )  (log |𝐶 | )
+                                                                                                                 Unoptimized Optimized Conjectured
+Pro 18.2 with an M1 Max 10-core processor and 64 GB RAM to
+                                                                                                      10            597         151          76
+record proof generation times, verification times and proof sizes                          4          15            1052        264          133
+for different predicate sizes presented in Fig. 1                                                     20            1634        410          206
+   The verification times and proof sizes provided rely on Con-                 80         5                        1308        328          165
+jecture 1. If we remove this assumption, we need to double the                             6                        1090        274          138
+                                                                                                      20
+proof sizes (and verification times) but the proof generation times                        7                        934         235          118
+would remain unchanged. This is because FRI operates over a large                          8                        818         206          104
+enough field that soundness holds for 𝛿 ≤ 𝐽𝜈 (1 − 𝜌). Table 2 in-                                     10            894         225          114
+cludes calculations for projected proof sizes at different security            120         4          15            1576        396          199
+levels and rates. We present expected numbers for three different                                     20            2450        614          308
+scenarios: (1) the current implementation, (2) the implementation
+after optimization (see Appendix F), and (3) the optimized proof
+system assuming Conjecture 1 also holds.
+   Our empirical results cannot be directly compared to other trans-
+                                                                         8 OPTIMIZATIONS AND VARIANTS
+parent proof systems such as [19], [20], [6], [41],[42], as the un-
+derlying constraint systems differ (all use R1CS, except [42]) and       8.1 Batching FRI
+thus predicate sizes (number of gates) don’t exactly capture the         Polynomial commitments and evaluations in RedShift reduce to
+same complexity across prototypes. Unlike all other approaches,          the following check: whether particular functions 𝑓1, . . . , 𝑓𝑘 repre-
+the PLONK constraint system also allows for ‘custom’ gates, which        sented as oracles are close to the space of degree 𝑑 polynomials.
+means that it can be further modified to be more efficient at express-   The batching approach is to replace all those separate and inde-
+ing specific types of circuits by using fewer circuit-specific gates.    pendent FRI queries by exactly one instance of FRI w.r.t a linear
+This makes a precise comparison between approaches difficult.            combination of functions 𝑓𝑖 , where the coefficients of linear depen-
+   Even so, certain comparative observations can be made. Firstly,       dence are provided by the verifier. This can be done, with details in
+proof generation times are competitive with state-of-the-art sys-        Appendix G.
+tems, such as Aurora and Fractal that achieve a performance of
+∼ 200 seconds on predicates of size 220 at 128-bit security. Note that
+                                                                         8.2    Binary Fields
+for us proof generation is only influenced by the rate parameter 𝜌,
+which we fix at 𝜌 = 1/16 in Fig. 1 for all considered security levels    Recall that PLONK is restricted to prime fields only. This is because
+to achieve 35 second proving time for size 220 circuits. Our results     [31] requires embedding a field F into a group of points on some
+are most comparable with Virgo [42] at ∼ 10 seconds.                     pairing-friendly elliptic curve. [3] provides a version of the FRI
+   Verification times for 80-bit security stay at around 3 − 6 ms for    protocol for binary fields which exploits additive and vector space
+circuit sizes up to 220 , clearly outperforming Aurora (∼ 4 seconds      structure of the underlying field. The rest of PLONK is field agnostic
+for the same). At 128-bit security, a linear scaling of verification     and only the permutation argument would require modification.
+time (due to the linear increase in the number of queries) gives         This means that RedShift can be instantiated for binary as well
+around ∼ 9ms. This matches the performance of Fractal (< 10 ms           as prime fields and all constructions and proofs follow through by
+at 128-bit security) and Virgo (∼ 12 ms at 100-bit security). Note       replacing the multiplicative domain |𝐷 | by an affine subspace. The
+that verification time is directly connected to proof size through the   binary variant of PLONK is especially effective for computations
+                                                                         that require a lot of bit manipulations.
+CCS ’22, November 7–11, 2022, Los Angeles, CA, USA.                                       Assimakis A. Kattis, Konstantin Panarin, and Alexander Vlasov
+
+
+                                                                     field that the original circuit (for which the verifier is expressed) is
+                                                                     defined, so there is no requirement for cycles over pairing-friendly
+                                                                     elliptic curves as in previous work. A hybrid approach exists that
+                                                                     performs the last step of recursion using a ‘pairing-based’ PLONK,
+                                                                     e.g. the BLS12-381 curve has a main subgroup of order |𝐺 | such
+                                                                     that 232 | (|𝐺 | − 1). This allows for instantiating RedShift. Table 2
+                                                                     shows that in the case of recursive constructions one could use a
+                                                                     higher rate for the “inner” and a lower one for the “outer” level of
+                                                                     recursion that verify the nested proofs, since a smaller inner circuit
+                                                                     is much cheaper to verify. This has been subsequently explored as
+                                                                     an avenue to practical recursion in [1].
+
+                                                                     8.4     Different Proof Systems
+                                                                     The LPC and PES primitives can be applied to proof systems such
+                                                                     as SONIC [32] and Marlin [19] that use univariate polynomial
+                                                                     commitments. Of interest here are the proximity testing parameters
+                                                                     e.g. testing inclusion in RS[F𝑞 , 𝐷, (𝑑 − 1)/|𝐷 |], where (in the case
+                                                                     of Marlin) 𝑑 = 2𝑘 . [6] contains a description of such a subroutine.
+
+                                                                     REFERENCES
+                                                                      [1] [n. d.]. Plonky2: Fast Recursive Arguments with PLONK and FRI. https://github.
+                                                                          com/mir-protocol/plonky2/blob/main/plonky2/plonky2.pdf. Accessed: 2022-08-
+                                                                          09.
+                                                                      [2] [n. d.]. StarkDEX: Bringing STARKs to Ethereum. https://blog.0xproject.com/
+                                                                          starkdex-bringing-starks-to-ethereum-6a03fffc0eb7. Accessed: 2022-08-09.
+                                                                      [3] Eli Ben-Sasson, Iddo Bentov, Yinon Horesh, and Michael Riabzev. 2018. Fast
+                                                                          Reed-Solomon interactive oracle proofs of proximity. In 45th International Collo-
+                                                                          quium on Automata, Languages, and Programming (ICALP 2018). Schloss Dagstuhl-
+                                                                          Leibniz-Zentrum fuer Informatik.
+                                                                      [4] Eli Ben-Sasson, Iddo Bentov, Yinon Horesh, and Michael Riabzev. 2019. Scal-
+                                                                          able zero knowledge with no trusted setup. In Annual International Cryptology
+                                                                          Conference. Springer, 701–732.
+                                                                      [5] Eli Ben-Sasson, Dan Carmon, Yuval Ishai, Swastik Kopparty, and Shubhangi
+                                                                          Saraf. 2020. Proximity Gaps for Reed–Solomon Codes. In 2020 IEEE 61st Annual
+                                                                          Symposium on Foundations of Computer Science (FOCS). IEEE, 900–909.
+                                                                      [6] Eli Ben-Sasson, Alessandro Chiesa, Michael Riabzev, Nicholas Spooner, Madars
+                                                                          Virza, and Nicholas P. Ward. 2018. Aurora: Transparent Succinct Arguments for
+                                                                          R1CS. Cryptology ePrint Archive, Report 2018/828. https://eprint.iacr.org/2018/
+                                                                          828.
+                                                                      [7] Eli Ben-Sasson, Alessandro Chiesa, and Nicholas Spooner. 2016. Interactive oracle
+                                                                          proofs. In Theory of Cryptography Conference. Springer, 31–60.
+                                                                      [8] Eli Ben-Sasson, Alessandro Chiesa, Eran Tromer, and Madars Virza. 2014. Suc-
+                                                                          cinct non-interactive zero knowledge for a von Neumann architecture. In 23rd
+                                                                          { USENIX } Security Symposium ( { USENIX } Security 14). 781–796.
+                                                                      [9] Eli Ben-Sasson, Lior Goldberg, Swastik Kopparty, and Shubhangi Saraf. 2019.
+                                                                          DEEP-FRI: Sampling outside the box improves soundness. arXiv preprint
+                                                                          arXiv:1903.12243 (2019).
+                                                                     [10] Eli Ben-Sasson, Swastik Kopparty, and Shubhangi Saraf. 2018. Worst-case to
+                                                                          Average Case Reductions for the Distance to a Code. In Proceedings of the 33rd
+                                                                          Computational Complexity Conference (San Diego, California) (CCC ’18). Schloss
+                                                                          Dagstuhl–Leibniz-Zentrum fuer Informatik, Germany, Article 24, 23 pages. https:
+                                                                          //doi.org/10.4230/LIPIcs.CCC.2018.24
+                                                                     [11] Dan Boneh, Joseph Bonneau, Benedikt Bünz, and Ben Fisch. 2018. Verifiable delay
+                                                                          functions. In Annual International Cryptology Conference. Springer, 757–788.
+                                                                     [12] Dan Boneh, Justin Drake, Ben Fisch, and Ariel Gabizon. 2020. Halo infinite: Re-
+Figure 1: Benchmark for RedShift with 𝜌 = 1/16. Top: Proof                cursive zk-snarks from any additive polynomial commitment scheme. Cryptology
+Generation Time (seconds). Center: Verification Time (ms).                ePrint Archive (2020).
+Bottom: Proof Size (kB).                                             [13] Sean Bowe, Ariel Gabizon, and Ian Miers. 2017. Scalable Multi-party Computation
+                                                                          for zk-SNARK Parameters in the Random Beacon Model. IACR Cryptology ePrint
+                                                                          Archive 2017 (2017), 1050.
+                                                                     [14] Benedikt Bünz, Jonathan Bootle, Dan Boneh, Andrew Poelstra, Pieter Wuille, and
+                                                                          Greg Maxwell. 2018. Bulletproofs: Short proofs for confidential transactions and
+8.3     Recursion                                                         more. In 2018 IEEE Symposium on Security and Privacy (SP). IEEE, 315–334.
+                                                                     [15] Benedikt Bünz, Ben Fisch, and Alan Szepieniec. 2019. Transparent SNARKs
+RedShift verification subroutines can be expressed as circuits,           from DARK Compilers. Cryptology ePrint Archive, Report 2019/1229. https:
+where the dominating operation will be the verification of Merkle         //eprint.iacr.org/2019/1229.
+                                                                     [16] Ran Canetti, Yilei Chen, Justin Holmgren, Alex Lombardi, Guy N Rothblum, and
+paths or inclusion proofs in some other cryptographic accumulator.        Ron D Rothblum. 2018. Fiat-Shamir from simpler assumptions. Cryptology ePrint
+All remaining arithmetic operations are performed over the same           Archive (2018).
+RedShift: Transparent SNARKs from List Polynomial Commitments                                                            CCS ’22, November 7–11, 2022, Los Angeles, CA, USA.
+
+
+[17] Pyrros Chaidos, Véronique Cortier, Georg Fuchsbauer, and David Galindo. 2016.         [42] Jiaheng Zhang, Tiancheng Xie, Yupeng Zhang, and Dawn Song. 2020. Transparent
+     Beleniosrf: A non-interactive receipt-free electronic voting scheme. In Proceedings        polynomial delegation and its applications to zero knowledge proof. In 2020 IEEE
+     of the 2016 ACM SIGSAC Conference on Computer and Communications Security.                 Symposium on Security and Privacy (SP). IEEE, 859–876.
+     ACM, 1614–1625.
+[18] Alessandro Chiesa, Yuncong Hu, Mary Maller, Pratyush Mishra, Noah Vesely,
+     and Nicholas Ward. 2019. Marlin: Preprocessing zkSNARKs with Universal and            A     CONSTRAINT SYSTEM EQUIVALENCE
+     Updatable SRS. Cryptology ePrint Archive, Report 2019/1047. https://eprint.iacr.
+     org/2019/1047.                                                                           Proof. Suffices to show a polynomial time transition between
+[19] Alessandro Chiesa, Yuncong Hu, Mary Maller, Pratyush Mishra, Noah Vesely,             the two constraint systems.
+     and Nicholas Ward. 2019. Marlin: Preprocessing zkSNARKs with Universal and
+     Updatable SRS. Cryptology ePrint Archive, Report 2019/1047. https://eprint.iacr.
+                                                                                              Suppose V = (a, b, c); think of V as a vector in [𝑚] 3𝑛 . For
+     org/2019/1047.                                                                        𝑖 ∈ [𝑚], let 𝑇𝑖 ⊂ [3𝑛] be the set of indices 𝑗 ∈ [3𝑛] such that
+[20] Alessandro Chiesa, Dev Ojha, and Nicholas Spooner. 2019. Fractal: Post-Quantum        V𝑗 = 𝑖. Now define 𝑇 L := {𝑇𝑖 }𝑖 ∈ [𝑚] - partition of [3𝑛] into non-
+     and Transparent Recursive Proofs from Holography. Cryptology ePrint Archive,
+     Report 2019/1076. https://eprint.iacr.org/2019/1076.                                  intersecting chunks. Define a permutation 𝜎 (𝑇 L ) on [3𝑛] in the
+[21] Pergament Evgenya. 2017. Algebraic RAM. Master’s thesis. Technion.                    following way: for each block 𝑇𝑖 of 𝑇 L , 𝜎 (𝑇 L ) contains a cycle
+[22] Ariel Gabizon and Zachary J. Williamson. [n. d.]. Proposal: The Turbo-PLONK           going over all elements of 𝑇𝑖 . For simplicity we write 𝜎 = 𝜎 (𝑇 L )
+     program syntax for specifying SNARK programs. https://docs.zkproof.org/pages/
+     standards/accepted-workshop3/proposal-turbo_plonk.pdf. Accessed: 2022-08-                Overloading notation, set the selector polynomials qL, qR , qO,
+     09.                                                                                   qM, qC ∈ F[𝑋 ] defined for each 𝑖 ∈ [𝑛] by
+[23] Ariel Gabizon, Zachary J Williamson, and Oana Ciobotaru. 2019. PLONK: Permuta-
+     tions over Lagrange-bases for Oecumenical Noninteractive arguments of Knowledge.                qL (𝑔𝑖 ) := (qL )𝑖 , qR (𝑔𝑖 ) := (qR )𝑖 , qO (𝑔𝑖 ) := (qO )𝑖 ,
+     Technical Report. Cryptology ePrint Archive, Report 2019/953.
+[24] Rosario Gennaro, Craig Gentry, Bryan Parno, and Mariana Raykova. 2013. Qua-                               qM (𝑔𝑖 ) := (qM )𝑖 , qC (𝑔𝑖 ) := (qC )𝑖 .
+     dratic span programs and succinct NIZKs without PCPs. In Annual International
+     Conference on the Theory and Applications of Cryptographic Techniques. Springer,      If (𝑥, 𝜔) is a relation L prepared for 𝑙 public inputs, then (𝑥 ′𝜔 ′ ) is
+                                                                                           a relation for L ′ computed in the following way:
+     626–645.
+[25] Craig Gentry and Daniel Wichs. 2011. Separating succinct non-interactive argu-
+     ments from all falsifiable assumptions. In Proceedings of the forty-third annual
+                                                                                                               Í
+                                                                                               (1) PI(X) := 𝑖 ∈ [𝑙 ] −𝑥𝑖 · 𝐿𝑖 (𝑋 )
+     ACM symposium on Theory of computing. ACM, 99–108.
+[26] Shafi Goldwasser, Yael Tauman Kalai, and Guy N Rothblum. 2015. Delegating                 (2) fL, fR , fO ∈ F[𝑋 ] are defined by the following condition:
+     computation: interactive proofs for muggles. Journal of the ACM (JACM) 62, 4                  ∀𝑖 ∈ [𝑛]
+     (2015), 1–64.
+[27] Shafi Goldwasser, Silvio Micali, and Charles Rackoff. 1989. The knowledge                               fL (𝑖) = xa𝑖 , fR (𝑖) = xb𝑖 , fO (𝑖) = xc𝑖 .
+     complexity of interactive proof systems. SIAM Journal on computing 18, 1 (1989),
+     186–208.                                                                                 It is easy to check that such a transition can be reversed, which
+[28] Jens Groth. 2016. On the size of pairing-based non-interactive arguments. In
+     Annual International Conference on the Theory and Applications of Cryptographic
+                                                                                           yields the proof.                                                  □
+     Techniques. Springer, 305–326.
+[29] V. Guruswami and M. Sudan. 1999. Improved decoding of Reed-Solomon and                Remark 1: Note that calculation of 𝑥 ′ requires only the access to
+     algebraic-geometry codes. IEEE Transactions on Information Theory 45, 6 (1999),       statement 𝑥 and no access to secret witness 𝜔.
+     1757–1767. https://doi.org/10.1109/18.782097
+[30] W Cary Huffman and Vera Pless. 2003. Fundamentals of error-correcting codes.          Remark 2: Note that permutation 𝜎 was chosen in such a way that
+     Cambridge Univ. Press, Cambridge. https://cds.cern.ch/record/1139892                  𝜔 is a valid witness for L|𝑥 iff fL, fR , fO constructed as described
+[31] Aniket Kate, Gregory M Zaverucha, and Ian Goldberg. 2010. Constant-size               before from a valid witness for L ′ |𝑥 ′ .
+     commitments to polynomials and their applications. In International Conference
+     on the Theory and Application of Cryptology and Information Security. Springer,
+     177–194.                                                                              B     FRI OVERVIEW
+[32] Mary Maller, Sean Bowe, Markulf Kohlweiss, and Sarah Meiklejohn. 2019. Sonic:
+     Zero-Knowledge SNARKs from Linear-Size Universal and Updateable Structured               Definition 17. For a function 𝑓 : 𝑆 → F, let interpolant 𝑓 be
+     Reference Strings. IACR Cryptology ePrint Archive 2019 (2019), 99.                    the unique degree < |𝑆 | polynomial that satisfies interpolant 𝑓 (𝑠) =
+[33] Silvio Micali. 2000. Computationally sound proofs. SIAM J. Comput. 30, 4 (2000),
+     1253–1298.                                                                            𝑓 (𝑠) for all 𝑠 ∈ 𝑆. This polynomial can be constructed by Lagrange
+[34] Ian Miers, Christina Garman, Matthew Green, and Aviel D Rubin. 2013. Zerocoin:        interpolation.
+     Anonymous distributed e-cash from bitcoin. In 2013 IEEE Symposium on Security
+     and Privacy. IEEE, 397–411.                                                           Setup phase. In the setup phase, the prover and verifier agree on
+[35] Srinath Setty. [n. d.]. Spartan: Efficient and general-purpose zkSNARKs without
+     trusted setup. ([n. d.]).                                                             the following parameters
+[36] Srinath Setty, Sebastian Angel, Trinabh Gupta, and Jonathan Lee. 2018. Proving             ◦ A prime field F.
+     the correct execution of concurrent services in zero-knowledge. In 13th { USENIX }
+     Symposium on Operating Systems Design and Implementation ( { OSDI } 18). 339–              ◦ A positive integer 𝑅 ∈ Z>0 and the rate 𝜌 = 2 −𝑅 .
+     356.                                                                                       ◦ A multiplicative domain 𝐷 = 𝐷 (0) = {𝜔, 𝜔 2, . . . , 𝜔 𝑛 } gener-
+                                                                                                  ated by an element 𝜔 = 𝜔 0 ∈ F∗ of order 𝑛 = 2𝑘 for some
+[37] Srinath Setty, Benjamin Braun, Victor Vu, Andrew J Blumberg, Bryan Parno, and
+     Michael Walfish. 2013. Resolving the conflict between generality and plausibility
+     in verified computation. In Proceedings of the 8th ACM European Conference on                𝑘 ∈ N. For chosen 𝜌 = 2 −𝑅 and 𝑛 = 2𝑘 the protocol will
+     Computer Systems. ACM, 71–84.
+[38] Alexander Vlasov and Konstantin Panarin. 2019. Transparent Polynomial Com-
+                                                                                                  check if 𝑓 is of degree < 𝜌𝑛 = 2𝑘 −𝑅 .
+     mitment Scheme with Polylogarithmic Communication Complexity. Cryptology                   ◦ The prover and verifier agree on a number of rounds 𝑟 < 𝑘 −
+     ePrint Archive, Report 2019/1020. https://eprint.iacr.org/2019/1020.                         𝑅 ∈ N and a sequence of sub-domains 𝐷 (0) , 𝐷 (1) , 𝐷 (2) , . . . , 𝐷 (𝑟 ) ,
+[39] Riad S Wahby, Ioanna Tzialla, Abhi Shelat, Justin Thaler, and Michael Walfish.
+     2018. Doubly-efficient zkSNARKs without trusted setup. In 2018 IEEE Symposium                constructed inductively as follows: suppose 𝐷 (𝑖 ) was al-
+     on Security and Privacy (SP). IEEE, 926–943.                                                 ready defined and generated (as a cyclic group) by 𝜔𝑖 . Let
+[40] Gavin Wood et al. 2014. Ethereum: A secure decentralised generalised transaction
+     ledger. Ethereum project yellow paper 151, 2014 (2014), 1–32.
+                                                                                                  𝑞(𝑋 ) : F → F be the map defined by the rule: 𝑞(𝑋 ) = 𝑋 2 .
+[41] Tiacheng Xie, Jiaheng Zhang, Yupeng Zhang, Charalampos Papamanthou, and                      Then define 𝐷 (𝑖+1) = 𝑞(𝐷 (𝑖 ) ). Note that 𝐷 (𝑖+1) is cyclic
+     Dawn Song. 2019. Libra: Succinct zero-knowledge proofs with optimal prover                   subgroup of F∗ generated by 𝜔𝑖+1 = 𝜔𝑖2 . Note that |𝐷 (𝑖 ) | =
+     computation. In Annual International Cryptology Conference. Springer, 733–764.
+                                                                                                  |𝐷 (0) |/2𝑖 and that ∀𝑖 ∈ {0, 1, . . . , 𝑟 − 1}, 𝐷 (𝑖 ) can be split
+CCS ’22, November 7–11, 2022, Los Angeles, CA, USA.                                                 Assimakis A. Kattis, Konstantin Panarin, and Alexander Vlasov
+
+
+       into cosets 𝑗 𝑠𝑖 𝑗 𝐻 (𝑖 ) where 𝐻 (𝑖 ) is the kernel of the homo-
+                     Ð
+                                                                                  is a modification to the FRI protocol operating over the domains
+                                                                                       ′                ′                         ′
+       morphism 𝑞(𝑋 )| 𝐷 (𝑖 ) : 𝐷 (𝑖 ) → 𝐷 (𝑖+1) . Note that all cosets           𝐷 (0) = 𝑔𝐷 (0) , 𝐷 (1) = 𝑔𝐷 (1) , . . . , 𝐷 (𝑟 ) = 𝑔𝐷 (𝑟 ) The function
+                                                                                                ′          ′
+       have equal size |𝐷 (𝑖 ) |/|𝐷 (𝑖+1) | = 2 and the number of cosets          mapping 𝐷 (𝑖 ) to 𝐷 (𝑖+1) is 𝑞 ′ (𝑋 ) = 𝑞 −1𝑋 2 . The modified version
+       𝑗 = |𝐷 (𝑖 ) |/2𝑖+1 .                                                       of FRI has the same security guarantees as the original one.
+   When we say that prover commits to function 𝑓 on domain 𝐷
+this means prover sends an oracle containing 𝑓 | 𝐷 i.e. all evaluations           C    SUPPLEMENTARY PROOFS
+of function 𝑓 on domain 𝐷.                                                           Proof of Theorem 4. It is immediate from the completeness of
+                                                                                  the FRI protocol that Algorithm 1 satisfies the completeness prop-
+Commit phase. In the commitment phase, the prover inductively                     erty for the given relation, which is verified directly by inspection.
+constructs and commits to a sequence of functions 𝑓 (0) , . . . , 𝑓 (𝑟 −1)        We also assume the existence of a (Gen, Com) binding commitment
+and a sequence of coefficients 𝑎 0, . . . , 𝑎𝑑 with which the verifier            tuple and model it as an oracle to the IOP on domain 𝐷.
+will construct the final function 𝑓 (𝑟 ) .                                           For the soundness bound, it suffices to show that the only source
+                                                                                  of soundness error comes from the FRI protocol. We concern our-
+     ◦ Input: a purported low degree polynomial 𝑓 (0) := 𝑓 ∈
+                                                                                  selves with the situation when 𝑞(𝑋 ) passes the FRI check and the
+       RS[F, 𝐷 (0) , 𝜌]. The prover commits to 𝑓 (0) on 𝐷 (0) .
+                                                                                  verifier is convinced that 𝑞(𝑋 ) is 𝛿-close to some polynomial ℎ(𝑋 )
+     ◦ For 0 ≤ 𝑖 < 𝑟 , given that 𝑓 (𝑖 ) was already defined (and                 with deg (ℎ) < 𝑑 − 𝑁 . This implies that, except at a 𝛿-fraction of
+       committed to), the prover constructs 𝑓 (𝑖+1) : 𝐷 (𝑖+1) → F in              points on domain 𝐷, the following relation holds:
+       the following way:
+       • The verifier sends a random 𝑥 (𝑖 ) ∈ F.                                                                              𝑁
+                                                                                                                              Ö
+       • For 𝑦 ∈ 𝐷 (𝑖+1) , let 𝑆 𝑦 = {𝑥 ∈ 𝐷 (𝑖 ) : 𝑞(𝑥) = 𝑦} be the                                 𝑓 (𝑋 ) = 𝑈 (𝑋 ) + ℎ(𝑋 )         (𝑋 − 𝑧𝑖 ).
+                                                                                                                              𝑖=1
+         coset of 𝐷 (𝑖 ) mapped to 𝑦.                                                                                    Î𝑁
+       • Using interpolation, the prover constructs the polynomial                   Note that 𝑡 (𝑋 ) = 𝑈 (𝑋 ) + ℎ(𝑋 ) 𝑖=1     (𝑋 − 𝑧𝑖 ) is a polynomial
+                     (𝑖 )                               (𝑖 ) |
+                                                                 𝑆 𝑦 (𝑋 )
+                                                                                  of degree less than 𝑑. From the second equation we get that this
+                   𝑝 𝑦 (𝑋 ) := interpolant 𝑓                                ,     polynomial is 𝛿-close to 𝑓 (𝑋 ) or that Δ(𝑓 , 𝑡) < 𝛿. Moreover, we
+          and defines                                                             have that ∀𝑖 ∈ [𝑁 ], 𝑡 (𝑧𝑖 ) = 𝑈 (𝑧𝑖 ) = 𝑦𝑖 by the definition of 𝑈 (𝑋 ).
+                                              (𝑖 )                                This means 𝑡 (𝑋 ) satisfies all the requirements for the candidate
+                            𝑓 (𝑖+1) (𝑦) := 𝑝 𝑦 (𝑥 (𝑖 ) ).
+                                                                                  polynomial 𝑔 in the definition of R 𝛿 (pp). Prover and verifier com-
+     ◦ If 𝑖 < 𝑟 − 1, the prover commits to the values of 𝑓 (𝑖+1) on               plexity results follow immediately by inspection of the IOP and the
+       𝐷 (𝑖+1) . If 𝑖 = 𝑟 − 1 then 𝑓 (𝑟 ) is a purported polynomial of            fact that the construction of an interpolation polynomial of degree
+       degree < 𝜌 |𝐷 (𝑟 ) |, in which case the prover commits to its              𝑁 can be achieved with 𝑂 (𝑁 log3 𝑁 ) field operations.
+       coefficients 𝑎 0, . . . , 𝑎𝑑 .                                                                                                                  □
+Query phase. In the query phase, the verifier (probabilistically)
+validates the proof sent by the prover.                                              Proof of Theorem 5. We construct the given IOP by using the
+                                                                                  LPC scheme equipped with an additional oracle O D providing
+     ◦ Input: a sequence of oracles 𝑓 (0) , . . . , 𝑓 (𝑟 −1) , and coefficients   access to D for both parties. Initially, the prover P queries O D (𝑓 )
+       𝑎 0, . . . , 𝑎𝑑 , with which the verifier constructs 𝑓 (𝑟 ) , by                                                  𝜇
+                                                                                  and appends the output {𝑥𝑖 , 𝑤𝑖 }𝑖=1 to its initial message to the
+                                  𝑑
+                                 ∑︁                                               verifier V. Subsequently, P and V simulate the LPC IOP for the input
+                𝑓 (𝑟 ) (𝑋 ) :=         𝑎𝑘 𝑋 𝑘 ∈ RS[F, 𝐷 (𝑟 ) , 𝜌].                                  𝜇              𝑁 of 𝜇+𝑁 pairs. This is possible as both
+                                                                                  set 𝑆 = {𝑥𝑖 , 𝑤𝑖 }𝑖=1 ∪{𝑧𝑖 , 𝑦𝑖 }𝑖=1
+                                 𝑘=0                                                                                        𝑁 were provided as public
+                                                                                  parties have access to 𝑆 as the {𝑧𝑖 , 𝑦𝑖 }𝑖=1
+     ◦ Verifier generates a random 𝑠 (0) ∈ 𝐷 (0) and for all 0 ≤ 𝑖 < 𝑟            input. By the security properties of the LPC scheme, except with
+        lets                                                                      probability 𝜖 (𝛿) the prover can convince the verifier of the existence
+      (1) 𝑠 (𝑖+1) := 𝑞(𝑠 (𝑖 ) )                                                   of some 𝑔 for which 𝑑𝑒𝑔(𝑔) < 𝑑, Δ(𝑓 , 𝑔) < 𝛿 and ∀𝑖 ∈ [𝑁 ], 𝑗 ∈ [𝜇]
+      (2) 𝑆 (𝑖 ) be the coset of 𝐻 (𝑖 ) in 𝐷 (𝑖 ) containing 𝑠 (𝑖 ) .             we have that 𝑔(𝑧𝑖 ) = 𝑦𝑖 and 𝑔(𝑥 𝑗 ) = 𝑤 𝑗 .
+     ◦ For 0 ≤ 𝑖 < 𝑟 − 1 the verifier checks that given 𝑓 (𝑖 ) , the                 Suffices to argue that 𝑓 = 𝑔. We know by the properties of the
+        function 𝑓 (𝑖+1) was constructed according to the protocol:               distinguisher that with probability 1 − 𝜂 (𝛿), ∃𝑘 ∈ [𝜇] for which
+        • She queries 𝑓 (𝑖 ) on all of 𝑆 (𝑖 ) , and                               ∀𝑔 ∈ 𝐿𝛿 (𝑓 )\{𝑓 }, 𝑔(𝑥𝑘 ) ≠ 𝑓 (𝑥𝑘 ). However, from the knowledge
+                                                     (𝑖 )                         claim above we know that ∀𝑗 ∈ [𝜇], 𝑔(𝑥 𝑗 ) = 𝑤 𝑗 where 𝑤 𝑗 = 𝑓 (𝑥 𝑗 )
+        • computes 𝑝 (𝑖 ) = interpolant 𝑓 |𝑆 (𝑖 ) , and
+                                                                                  (since it was an oracle query response). This means that 𝑔(𝑥𝑘 ) =
+        • performs a “round consistency" check:
+                                                                                  𝑓 (𝑥𝑘 ) and, since Δ(𝑓 , 𝑔) < 𝛿, we have that 𝑓 = 𝑔.                    □
+                       𝑓 (𝑖+1) (𝑠 (𝑖+1) ) = 𝑝 (𝑖 ) (𝑥 (𝑖 ) ).
+                                                                                     Proof of Claim 1. We begin with the case that 𝜇 = 1. If at the
+      Note that in the last check, the function considered is 𝑓 (𝑟 )
+                                                                                  setup step the choice of 𝑥 ∈ F was random, by the Schwartz-Zippel
+      which is in RS[F, 𝐷 (𝑟 ) , 𝜌] by construction. If all tests pass,           lemma the probability that any degree 𝑑 polynomial 𝑔 ∈ 𝐿𝛿 (𝑓 )
+      the verifier accepts the proof. Otherwise, she rejects.                     satisfies 𝑔(𝑥) = 𝑓 (𝑥) is:
+Remark: Instead of taking a family of nested sub-domains to be
+multiplicative subgroups it is also possible to take the cosets of                                                    deg (𝑔(𝑋 ) − 𝑓 (𝑋 ))    𝑑
+them. To be more precise, consider any shift 𝑔 ∈ F∗ \𝐷. There                              Pr [𝑔(𝑥) − 𝑓 (𝑥) = 0] ≤                         ≤     .
+                                                                                           𝑥                                  |F|            |F|
+RedShift: Transparent SNARKs from List Polynomial Commitments                                                      CCS ’22, November 7–11, 2022, Los Angeles, CA, USA.
+
+
+    Enumerating over all 𝑔 𝑗 ∈ 𝐿𝛿 (𝑓 )\{𝑓 } with a union bound:                       Enumerating products on both sides proves equality, and hence
+              Ø                                                                     completeness.
+                                                   𝑑
+         Pr               𝑔 𝑗 (𝑥) − 𝑓 (𝑥) = 0 ≤     · (|𝐿𝛿 | − 1).
+         𝑥                                         |F|                               D.2      Knowledge Soundness
+              𝑗 ∈ |𝐿𝛿 | −1
+                                                
+                                                
+                                                                                      We require two auxiliary lemmas, proved in [23].
+   For 𝜇 > 1, the distinguisher needs to find at least one such point
+out of 𝜇 i.i.d random samples. This will only fail if all 𝜇 random                       Lemma 2. Let 𝑘 ∈ N. Fix 𝐹 1, . . . , 𝐹𝑘 ∈ F[𝑋 ] and 𝑍 ∈ F[𝑋 ]. Sup-
+                                                                                      pose that for some 𝑖 ∈ [𝑘], 𝑍 ∤ 𝐹𝑖 . Then, except with probability |F|1
+samples are not separation points. The result follows from the
+                                                                                                                                                   Í𝑘
+independence of the random samples, while the time complexity                         over uniformly random 𝑎 1, . . . , 𝑎𝑘 ∈ F, 𝑍 ∤ 𝐹 , where 𝐹 := 𝑖=1 𝑎𝑖 𝐹𝑖 .
+bound follows as evaluation of 𝑓 takes 𝑂 (𝑑) time.                     □
+                                                                                          Lemma 3. Let 𝑛 ∈ N. Fix a permutation 𝜎 of [𝑛], and 𝑎 1, . . . , 𝑎𝑛 ,
+   Proof of Theorem 6. The random sampling distinguisher along-                       𝑏 1, . . . , 𝑏𝑛 ∈ F. Suppose that for some 𝑖 ∈ [𝑛] 𝑏𝑖 ≠ 𝑎𝜎 (𝑖 ) . Then except
+                                                                                      with probability |F|   𝑛 over random 𝛽, 𝛾 ∈ F:
+side the FRI LPC define a PES satisfying the claim. The statement
+follows directly from Theorem 4 and Claim 1, while the upper                                          𝑛
+                                                                                                      Ö                        𝑛
+                                                                                                                               Ö
+bound on the soundness of 𝜂 is obtained using Theorem 1.       □                                             (𝑎𝑖 + 𝛽𝑖 + 𝛾) =         (𝑏𝑖 + 𝛽𝜎 (𝑖) + 𝛾) .
+                                                                                                       𝑖=1                     𝑖=1
+D     REDSHIFT SECURITY ANALYSIS                                                         Let 𝑡 1 and 𝑡 2 denote the number of PES and LPC instances.
+Below we provide a proof of Theorem 7. For clarity, we consider                          (1) The PES is used on 𝑆𝜎1 , 𝑆𝜎2 , 𝑆𝜎3 , qL , qR , qM, qO, qC at point
+the completeness and knowledge soundness cases separately. More                              𝑦 ∈ F\𝐷 sent by V, hence 𝑡 1 = 8. Although technically re-
+specifically, the protocol satisfying the theorem statement is:                              quired, we do not evaluate the PES on 𝐿1, 𝐿𝑛 , 𝑍, 𝑆𝑖𝑑1 , 𝑆𝑖𝑑2 , 𝑆𝑖𝑑3
+                  RedShift(pp, PI, 𝑛, ⊥, 𝑁 ; fL, fR , fO ).                                  as these polynomials are in reduced form and can be evalu-
+                                                                                             ated by V without any help from P. More precisely, polyno-
+For simplicity, we assume that any polynomial that uses the IOPP                             mials 𝑆𝑖𝑑 𝑗 for 𝑗 ∈ [3] are linear, 𝐿𝑖 (𝑋 ) for 𝑖 ∈ [𝑛 + 1] are of
+schemes can be decomposed into parts that each have at most                                  the form:
+degree 𝑛, thus allowing us to only require one RS code family for 𝑛.                                                     𝑐𝑖 (𝑋 𝑛+1 − 1)
+Note that here we ignore the mask polynomials by setting a null                                                 𝐿(𝑋 ) =
+                                                                                                                             𝑋 − 𝑔𝑖
+value for 𝑘.
+                                                                                             for some constant 𝑐𝑖 and 𝑍 (𝑋 ) is of the form:
+D.1      Completeness
+                                                                                                                   Ö                 𝑋𝑛 − 1
+                                                                                                          𝑍 (𝑋 ) =       (𝑋 − 𝑎) =           .
+Assume P possesses a valid witness consisting of polynomials                                                           ∗             𝑋 −1
+                                                                                                                     𝑎∈𝐻
+fL, fR , fO . which copy-satisfy 𝜎. Note that the addition of mask-                       (2) LPC instances for witness polynomials 𝑓1 (𝑋 ) = fL (𝑋 ), 𝑓2 (𝑋 ) =
+ing polynomials doesn’t change the values of fL, fR , fO on 𝐷. It is                          fR (𝑋 ), 𝑓3 (𝑋 ) = fO (𝑋 ),𝑇0 (𝑋 ), 𝑇1 (𝑋 ),𝑇2 (𝑋 ) (for 𝑇 = 𝑇0 +
+straightforward to check that 𝐹 6 (𝑋 ) is identically zero on 𝐷 ∗ by                          𝑋 𝑛𝑇1 +𝑋 2𝑛𝑇2 ) are evaluated at point 𝑦. For polynomials 𝑃 (𝑋 )
+the definition of witness polynomials, 𝐹 1 (𝑋 ), 𝐹 2 (𝑋 ), 𝐹 3 (𝑋 ), 𝐹 4 (𝑋 )                 and 𝑄 (𝑋 ) they are evaluated at points 𝑦 and 𝑦 · 𝑔 (within
+will be zero on 𝐷 ∗ by construction of 𝑃 (𝑋 ) and 𝑄 (𝑋 ). To prove                            one instance), giving 𝑡 2 = 8. Note that 𝑡 2 = 6 if we have 𝑇
+completeness of the protocol it is then enough to check that 𝐹 5 (𝑋 )                         instead of the optimized 𝑇0,𝑇1,𝑇2 .
+is identically zero on 𝐷 ∗ . Using the properties of the Lagrange basis,                 We begin by showing round-by-round soundness error. Suffices
+this is equivalent for 𝑃 (𝑔𝑛+1 ) = 𝑄 (𝑔𝑛+1 ).                                         to construct a State function using the transcript of the proof, which
+    By definition of 𝑃 (𝑋 ) and 𝑄 (𝑋 ), the above becomes:                            is of the following form:
+    𝑛
+    ÖÖ3                                                                                          tr := (𝑓1, 𝑓2, 𝑓3, 𝛽, 𝛾, 𝑃, 𝑄, a,𝑇 , y, g · y, 𝑤, tr𝐿𝑃𝐶 )
+              𝑓 𝑗 (𝑔𝑖 ) + 𝛽 · 𝑘 𝑗 𝑔𝑖 + 𝛾 =
+    𝑖=1 𝑗=1                                                                           where a = (𝑎 1, ..., 𝑎 6 ) and y, g · y ∈ F𝑁 while for 𝑗 ∈ [3], 𝑤 :=
+                                       3 
+                                     𝑛 Ö
+                                     Ö                                                     𝑇 (y), 𝑃 (y), 𝑃 (g · y), 𝑄 (y), 𝑄 (g · y), 𝑓 𝑗 (y), 𝑆𝑖𝑑 𝑗 (y), 𝑆𝜎 𝑗 (y)
+                                 =              𝑓 𝑗 (𝑔𝑖 ) + 𝛽 · 𝜎 ′ (𝑘 𝑗 𝑔𝑖 ) + 𝛾 .
+                                                                                      the openings of each evaluated polynomial at y, g · y and tr𝐿𝑃𝐶 =
+                                     𝑖=1 𝑗=1                                             1 , ..., tr𝑡 1 +𝑡 2 ) the transcript of the LPC evaluation routines,
+                                                                                      (tr𝐿𝑃𝐶         𝐿𝑃𝐶
+    Since 𝜎 ′ = 𝜏 ◦ 𝜎 ◦ 𝜏 −1 , we rewrite this as follows:                            where tr𝑖𝐿𝑃𝐶 the transcript of the 𝑖-th LPC routine. Note that the LPC
+                                                                                      routines have round-by-round soundness error 𝜖FRI and therefore
+              𝑛 3 
+              ÖÖ                                                                    admit a set of functions State𝑖𝐿𝑃𝐶 for 𝑖 ∈ [𝑡 1 + 𝑡 2 ].
+                        𝑓 ( 𝑗 −1)𝑛+𝑖 + 𝛽 · 𝜏 ( 𝑗 − 1)𝑛 + 𝑖 + 𝛾
+                                                                                      State(𝑝𝑝, PI, 𝑛, ⊥, 𝑁 , tr)
+              𝑖=1 𝑗=1
+                                                                                         (1) If 𝑓1, 𝑓2, 𝑓3, 𝑃, 𝑄,𝑇 𝛿-close to codewords 𝑓ˆ1, 𝑓ˆ2, 𝑓ˆ3, ˆ 𝑃, 𝑄, ˆ 𝑇ˆ :
+                3 
+              𝑛 Ö
+                                                                                            (a) If 𝑓ˆ1, 𝑓ˆ2, 𝑓ˆ3 copy-satisfy 𝜎 and 𝑞 C + PI +𝑞 L 𝑓ˆ1 +𝑞 R 𝑓ˆ2 +𝑞 O 𝑓ˆ3 +
+              Ö                                                   
+          =             𝑓 ( 𝑗 −1)𝑛+𝑖 + 𝛽 · 𝜏 ◦ 𝜎 ( 𝑗 − 1)𝑛 + 𝑖 + 𝛾
+              𝑖=1 𝑗=1                                                                           𝑞 M 𝑓ˆ1 𝑓ˆ2 ‘ = 0, accept
+                                                                                           (b) If 𝑍 (𝑋 )| 𝐹ˆ𝑖 (𝑋 ) for all 𝑖 ∈ [6], accept
+    Now we use the fact that 𝑓1, 𝑓2, 𝑓3 copy-satisfy 𝜎:
+                                                                                            (c) If any element of a is empty, reject
+                                                                                                               Í6
+                         𝑓 ( 𝑗 −1)𝑛+𝑖 = 𝑓𝜎 ( ( 𝑗 −1)𝑛+𝑖 ) .                                 (d) If 𝑍 (𝑋 )| 𝑖=1      𝑎𝑖 𝐹ˆ𝑖 (𝑋 ), accept
+CCS ’22, November 7–11, 2022, Los Angeles, CA, USA.                                                          Assimakis A. Kattis, Konstantin Panarin, and Alexander Vlasov
+
+
+       (e) If any element of y is empty, reject                                         of this function be tn𝑖𝐿𝑃𝐶 , and notice that by the soundness of the
+                                Í6
+       (f) If ∀𝑚 ∈ [𝑁 ], 𝑖=1          𝑎𝑖 𝐹ˆ𝑖 (𝑦𝑚 ) = 𝑇ˆ (𝑦𝑚 ) · 𝑍 (𝑦𝑚 ), accept         LPC scheme, Pr(State𝑖𝐿𝑃𝐶 (𝑝𝑝, PI, 𝑛, 𝑁 , tr𝑖𝐿𝑃𝐶 ) = 1) ≤ 𝜖FRI . By the
+       (g) Reject                                                                       Frechet inequality, the probability over a conjunction of events is
+    (2) If tn𝑖𝐿𝑃𝐶 =⊥ for some 𝑖 ∈ [𝑡 1 + 𝑡 2 ], reject.                                 upper bounded by the minimum of the probabilities of the individ-
+                     𝑡 1 +𝑡 2
+    (3) Return ∩𝑖=1           State𝑖𝐿𝑃𝐶 (𝑝𝑝, PI, 𝑛, 𝑁 , tr𝑖𝐿𝑃𝐶 ).                       ual events. We thus get that Step 3 has round-by-round soundness
+    Note that tr =⊥, State(𝑝𝑝, PI, 𝑛, ⊥, 𝑁 , ⊥) = 0. We begin with                      upper bounded by 𝜖FRI .
+Step 1, when the (partial) transcript provided contains a set of func-                      Remains to show that if State outputs 0, then so will the verifier.
+tions 𝛿-close to codewords. Suppose that we have a non-satisfying                       There are two situations in which State rejects a full transcript: if
+assignment. By definition of the constraint system argument, this is                    none of parts (a), (b), (d), (f) accept, or if some State𝑖𝐿𝑃𝐶 rejects. In
+a set of codewords 𝑓ˆ1, 𝑓ˆ2, 𝑓ˆ3 that either (1) don’t copy-satisfy 𝜎, or (2)           the former, the verifier will output 0 since the final step in verifica-
+                                                                                        tion will fail as otherwise step (f) would have passed. In the latter,
+don’t satisfy the equality 𝑞 C + PI + 𝑞 L 𝑓ˆ1 + 𝑞 R 𝑓ˆ2 + 𝑞 O 𝑓ˆ3 + 𝑞 M 𝑓ˆ1 𝑓ˆ2 ‘ = 0
+                                                                                        rejection by State𝑖𝐿𝑃𝐶 means that the verifier for the LPC will also
+on 𝐷 ∗ . In this case, part (a) never holds. Part (b) outputs accept
+                                                                                        fail. However, this means that the verifier for the whole IOP fails,
+if 𝑍 (𝑋 ) divides all of the provided 𝐹ˆ𝑖 , which can be inferred from
+                                                                                        as the second last step in verification is to check that all LPC/PES
+the transcript using 𝑓ˆ1, 𝑓ˆ2, 𝑓ˆ3, 𝛽, 𝛾, ˆ    𝑃, ˆ
+                                                  𝑄. This however means that
+                                                                                        instances verify.
+it divides 𝐹ˆ6 , and therefore that the second condition in part (a)
+                                                                                            The extractor E (𝑝𝑝, PI, 𝑛, ⊥, 𝑁 , tr) with access to the first three
+is satisfied. Thus the only way for part (b) to output success is if
+                                                                                        functions as the transcript runs the Guruswami-Sudan list-decoding
+the 𝑓ˆ1, 𝑓ˆ2, 𝑓ˆ3 don’t copy-satisfy 𝜎 and all 𝐹ˆ𝑖 are divisible by 𝑍 . This
+                                                                                        algorithm and returns the codewords 𝑓ˆ1, 𝑓ˆ2, 𝑓ˆ3 𝛿-close to 𝑓1, 𝑓2, 𝑓3 . If
+happens with probability at most 1/|F|. This is because by the proof
+                                                                                        State moves to accept with probability greater than max (𝜖1, 𝜖FRI ),
+of completeness property:
+                                                                                        then 𝑓ˆ1, 𝑓ˆ2, 𝑓ˆ3 all copy-satisfy 𝜎 and identically satisfy 𝑞 C + PI +
+             𝑞 Ö
+               3 
+             Ö                                                                        𝑞 L 𝑓ˆ1 + 𝑞 R 𝑓ˆ2 + 𝑞 O 𝑓ˆ3 + 𝑞 M 𝑓ˆ1 𝑓ˆ2 ‘ = 0, as part (a) has to accept in step 1
+                        𝑓ˆ( 𝑗 −1)𝑞+𝑖 + 𝛽 · 𝜏 ( 𝑗 − 1)𝑞 + 𝑖 + 𝛾 =                        of State. This is by the round-by-round soundness analysis above,
+             𝑖=1 𝑗=1
+                                                                                        which bounds the probability of moving to an accepting state from
+            𝑞
+            ÖÖ3                                                                       an invalid starting witness to less than max (𝜖1, 𝜖FRI ).
+                                                             
+                       𝑓ˆ( 𝑗 −1)𝑞+𝑖 + 𝛽 · 𝜏 ◦ 𝜎 ( 𝑗 − 1)𝑞 + 𝑖 + 𝛾 .              (•)
+            𝑖=1 𝑗=1                                                                     D.3      Zero-Knowledge
+  However, P doesn’t posses a valid witness (else part (a) would                        Suffices to show that there exists a simulator 𝑆 not possessing a
+succeed) and, since 𝑞 = 1 here, lemma 3 gives:                                          valid witness for L such that 𝑆 is able to generate a transcript
+                                                                                        ⟨𝑆⟩ which is indistinguishable from the view of an honest prover-
+                                                                         1
+       Pr(𝑒𝑞. (•) holds | 𝑓ˆ1, 𝑓ˆ2, 𝑓ˆ3 don’t copy-satisfy 𝜎) ≤             .           verifier interaction up to 𝑧. Since we need perfect zero knowledge,
+                                                                        |F|             we will show that 𝑧 = 0. For simplicity we denote the transcript
+     The probability of moving to accept in (d) is also upper bounded                   in this context as the random variables ⟨𝑎 1, 𝑎 2, . . . , 𝑎𝑛 ⟩, where 𝑎𝑖
+by 1/|F|, since a is randomly distributed (and some 𝐹ˆ𝑖 is not divisible                represents either the verifier’s messages/queries or the prover’s
+by 𝑍 , else (b) would accept); the result follows from Lemma 2. Part                    responses to the corresponding queries. Note that the transcript
+(f) moves to accept only in the case where no 𝑇ˆ exists for which the                   doesn’t capture any information about the oracles themselves: we
+given equality holds identically, else part (d) would have accepted.                    treat all oracles as ideal and hence as exposing no data except for
+Since the evaluations are at a random point y ∈ F, the probability                      the elements sent in response to the verifier’s queries (which are
+that they coincide for two different polynomials is bounded above as                    encoded inside 𝑎𝑖 ). This is a public-coin protocol in which all of the
+                                 Í6
+4𝑛/|F\𝐷 |, since the degrees of 𝑖=1    𝑎𝑖 𝐹ˆ𝑖 , 𝑇ˆ ·𝑍 are at most 4𝑛 and thus           verifier’s queries are randomly distributed field elements.
+the polynomials can only agree on up to 4𝑛 points without being                            We are going to construct the simulator 𝑆 and transcript ⟨𝑆⟩ in
+identically equal. Using the Schwartz-Zippel lemma and taking a                         the following way: we will set as many variables of the transcript as
+union bound over all possible tuples (note that the Johnson bound                       possible to be uniformly and randomly distributed. All remaining
+𝐽𝜌,𝜈 upper bounds the list size) yields an error term of 𝜖IOP :=                        values will be uniquely fixed by the choice of the previous ran-
+  𝑡2                                                                                    dom variables. We will then show that such an approach finally
+𝐽𝜌,𝜈   · 4𝑛/|F\𝐷 |. To succeed for 𝑁 independently random points,
+                               𝑁 . This gives a round-by-round error-                   results in the requirement for the witness polynomials 𝑓𝑖 to have
+this yields an error term of 𝜖IOP
+                                                                                      uniformly and randomly distributed values over some domains
+contribution term of 𝜖1 = max 1/|F|, 𝜖IOP       𝑁      in the case when the             𝐾𝑖 (𝐾𝑖 are in general different for each witness polynomial). Then
+input polynomials are 𝛿-close to codewords.                                             we will show that adding to each witness polynomial a masking
+     If the transcript terminates within the first step, then we have                   polynomial 𝐻𝑖 (𝑋 ) of degree at least |𝐾𝑖 | is enough to achieve the re-
+that the error is at most 𝜖1 by the above analysis. In the case that the                quired uniform distribution of values over 𝐾𝑖 , which suffices for the
+transcript ends after this, it must hold that there exists at least one                 proof. More specifically, to retain soundness we will add masking
+of the prover provided oracles that is not 𝛿-close to a codeword. We                    polynomials of the form 𝑍 (𝑋 )𝐻𝑖 (𝑋 ), as we don’t want to change
+evaluate State𝑖𝐿𝑃𝐶 ∀𝑖 ∈ [𝑡 1 + 𝑡 2 ] and an accepting output happens                    the values of 𝑓𝑖 (𝑋 ) on the domain 𝐷 = 𝐻 ∗ defined by 𝑍 (𝑋 ).
+only if all transcripts tr𝑖𝐿𝑃𝐶 for 𝑖 ≤ 𝑡 1 + 𝑡 2 lead to accepting states.                 We can rewrite the transcript of RedShift in the following form:
+However, at least one function is not 𝛿-close to a codeword, which
+would add 𝜖FRI soundness error. Let the corresponding transcript                                   ⟨𝛽, 𝛾, 𝑧, T ⟨𝑓1 ⟩, T ⟨𝑓2 ⟩, T ⟨𝑓3 ⟩, T ⟨𝑇 ⟩, T ⟨𝑃⟩, T ⟨𝑄⟩⟩,
+RedShift: Transparent SNARKs from List Polynomial Commitments                                                              CCS ’22, November 7–11, 2022, Los Angeles, CA, USA.
+
+
+where T ⟨𝑓 ⟩ denotes the part of the transcript corresponding to the                             of FRI are fully unrolled and hence that 𝑓 (𝑟 ) (𝑥) is constant.
+LPC with respect to the witness oracle 𝑓 . Note that we do not list                              The proof for the general case deg(𝑓 (𝑟 ) ) > 0 is only a little
+the transcripts corresponding to the instances of the elements that                              more involved and is handled in a similar fashion.
+are precomputed as part of the public parameters.                                            (5) 𝑠 (0) ∈ 𝐷 is the value chosen by the verifier at the beginning
+    Let 𝛽, 𝛾 to be uniformly randomly distributed over F and 𝑦 to                                of the FRI QUERY phase.
+be uniformly and randomly distributed over F\𝐻 . As those values                             (6) Every 𝑠 (𝑖+1) = 𝑞(𝑠 (𝑖 ) ) (for the definition of 𝑞(𝑥) refer to FRI
+are also taken at random on exactly the same domains by a honest                                 section). 𝑠 (𝑖 ) , 𝑡 (𝑖 ) is the coset of 𝑠 (𝑖+1) .
+verifier during the actual interaction with the prover, this part of the                    The simulated transcript ⟨𝑆⟩ of FRI on 𝑓 is constructed in the
+transcript in ⟨𝑆⟩ and ⟨𝑃, 𝑉 ⟩ is equidistributed. For ⟨𝑆⟩ we also take                   following way:
+the openings of each witness function except for 𝑇 (𝑋 ), 𝑃 (𝑋 ), 𝑄 (𝑋 )
+                                                                                             (1) The point 𝑖 (or two points (𝑖 1, 𝑖 2 )) are already fixed by the
+to be uniformly randomly distributed over F. The evaluation of
+                                                                                                 previous history of ⟨𝑆⟩: i.e. 𝑖 = 𝑦 or (𝑖 1, 𝑖 2 ) = (𝑦, 𝑔 · 𝑦).
+𝑇 (𝑋 ) at 𝑦 is uniquely determined for any true transcript ⟨𝑃, 𝑉 ⟩
+                                                                                             (2) Similarly for the corresponding evaluations 𝑧 1 (or (𝑧 1, 𝑧 2 )):
+and hence the same relation between variables should hold for the
+                                                                                                 recall that they are either chosen at random (for witness
+simulator’s transcript ⟨𝑆⟩ for them to be indistinguishable. Note,
+                                                                                                 polynomials 𝑓1, 𝑓2, 𝑓3 ) or defined uniquely by all the previous
+we have used the fact that 𝑦 ∉ 𝐻 here: in this case 𝑍 (𝑦) ≠ 0 and so
+                                                                                                 values (for 𝑇 , 𝑄, 𝑃).
+we can obtain a unique value for the RHS of (1) that will satisfy
+                                                                                             (3) The values 𝑥 (𝑖 ) are distributed uniformly over F for an hon-
+(1) for any random choice of evaluations on LHS. Similarly for
+                                                                                                 est verifier 𝑉 . We take the same approach in the simulator 𝑆:
+the values of 𝑃 (𝑋 ) and 𝑄 (𝑋 ): by construction, these values are
+                                                                                                 in ⟨𝑆⟩ every 𝑥 (𝑖 ) is chosen uniformly at random from F.
+uniquely specified based on 𝑓1, 𝑓2, 𝑓3 . At any point when we sample
+a random element for the value of a witness polynomial 𝑓𝑖 (𝑔 𝑗 ) for                         (4) For ⟨𝑆⟩ we take 𝑠 (0) to be uniformly random over 𝐷 = 𝐷 (0) .
+𝑔 𝑗 ∈ 𝐻 ∗ (which we have not sampled before), we make sure that                              (5) In ⟨𝑆⟩ the values of 𝑞 (0) (𝑠 0 ) and 𝑞 (0) (𝑡 (0) ) are also taken
+the values of 𝑇 (𝑔 𝑗 ), 𝑃 (𝑔 𝑗 ), 𝑄 (𝑔 𝑗 ) are updated so as to satisfy the                      uniformly at random over F.
+above constraints. Note that this means we also need to sample                               (6) Recall that in the FRI protocol we have:
+                                                                                                                                              (𝑖 )
+𝑓𝑘 (𝑔 𝑗 ), 𝑘 ∈ [3]\{𝑖} as this is needed for 𝑃, 𝑄,𝑇 . We keep track of                                               𝑞 (𝑖+1) (𝑠 (𝑖+1) ) = 𝑝 (𝑖+1) (𝑥 (𝑖 ) )
+                                                                                                                                              𝑠
+all such oracle calls and return the provided value in the case of
+repeated queries, retaining consistency. In the analysis below, we                               where:
+                                                                                                              (𝑖 )                            𝑞 (𝑖 ) | {𝑠 (𝑖 ) ,𝑡 (𝑖 ) }
+implicitly do this check (and update) whenever it is stated that we                                         𝑝 (𝑖 ) (𝑋 ) := interpolant                                     (𝑋 ),
+                                                                                                              𝑠
+randomly sample a new element as the evaluation of some function
+of a witness polynomial.                                                                          hence the value of every 𝑞 (𝑖+1) (𝑠 (𝑖 ) ) is uniquely determined
+    We now analyze the transcript T (𝑓 ) for a given witness polyno-                             by the values of 𝑞 (𝑖 ) (𝑠 (𝑖 ) ) and 𝑞 (𝑖 ) (𝑡 (𝑖 ) ) that were chosen
+mial where the LPC is instantiated with FRI. In the actual interac-                              at the previous iteration. In the simulator transcript, this re-
+tion between the prover and verifier the transcript T ⟨𝑓 ⟩ is of the                             lation between 𝑞 (𝑖 ) (𝑠 (𝑖 ) ), 𝑞 (𝑖 ) (𝑡 (𝑖 ) ), 𝑞 (𝑖+1) (𝑠 (𝑖+1) ) should re-
+following form:                                                                                  main unchanged. Since we have fixed the values of 𝑞 (0) (𝑠 (0) ),
+                                                                                                 𝑞 (0) (𝑡 (0) ) above, 𝑞 (1) (𝑠 (1) ) in ⟨𝑆⟩ is then uniquely deter-
+                                                                                                 mined.
+                                         𝑖 1 , 𝑖 2 , . . . , 𝑖𝑘
+                                                                                             (7) We proceed by induction: to fix the value 𝑞 (𝑖 ) (𝑠 (𝑖 ) ) we choose
+                                        𝑧 1 , 𝑧 2 , . . . , 𝑧𝑘                                   the value 𝑞 (𝑖 ) (𝑡 (𝑖 ) ) to be uniformly randomly distributed
+                              𝑥   (0)
+                                        , 𝑥 (1) , . . . , 𝑥 (𝑟 −1)                               over F and compute 𝑞 (𝑖+1) (𝑠 (𝑖+1) ) for 𝑖 ∈ [𝑟 − 2]\{1}.
+                                                                                             (8) Compute 𝑎 0 based on 𝑞 (𝑟 −1) (𝑠 (𝑟 −1) ) and 𝑞 (𝑟 −1) (𝑡 (𝑟 −1) ).
+                                             𝑎 0, 𝑠 (0)
+                                                                                             Remains to show that this achieves the same distribution for
+    𝑞 (0) (𝑠 (0) ), 𝑞 (0) (𝑡 (0) ), . . . , 𝑞 (𝑟 −1) (𝑠 (𝑟 −1) ), 𝑞 (𝑟 −1) (𝑡 (𝑟 −1) )   transcripts in the honest prover-verifier interaction ⟨𝑃, 𝑉 ⟩. First, for
+where:                                                                                   all witness polynomials (except for 𝑇 , 𝑃, 𝑄) we want their values at
+                                                                                         𝑦 to look like randomly distributed values over F. Moreover, due to
+  (1) 𝑖 1, 𝑖 2, . . . , 𝑖𝑘 ∈ F are the points at which the verifier asks to
+                                                                                         our construction of ⟨𝑆⟩ we want the values
+      open oracle 𝑓 . 𝑘 = 1 for a single-point evaluation (conducted
+      for witness polynomials 𝑓1, 𝑓2, 𝑓3,𝑇 at 𝑦) and 𝑘 = 2 for double                      𝑞 (0) (𝑠 (0) ), 𝑞 (0) (𝑡 (0) ), 𝑞 (1) (𝑡 (1) ), 𝑞 (2) (𝑡 (2) ), . . . , 𝑞 (𝑟 −1) (𝑡 (𝑟 −1) )
+      evaluation (conducted for 𝑃 and 𝑄 at the points 𝑦 and 𝑔 · 𝑦).                      to look uniformly random. In order to show this we need the fol-
+  (2) 𝑧 1, 𝑧 2, . . . , 𝑧𝑘 are the corresponding prover-sent openings.                   lowing lemma:
+  (3) 𝑥 (0) , 𝑥 (1) , . . . , 𝑥 (𝑟 −1) are random elements of F sent by the
+      verifier during the FRI COMMIT phase, which is conducted                               Lemma 4. Let 𝑓 (𝑋 ) denote the interpolation polynomial of 𝑍 =
+      with respect to the quotient function:                                             {𝑧 1, 𝑧 2, . . . , 𝑧𝑛 } over domain 𝐼 = {𝑖 1, . . . , 𝑖𝑛 }. Let 𝑥 ∈ F be different
+                                                                                         from all 𝑖 2, . . . 𝑖𝑛 . If 𝑧 1 is uniformly random over F then 𝑓 (𝑥) is also
+                                          𝑓 (𝑋 ) − 𝑈 (𝑋 )
+                     𝑞(𝑋 ) = 𝑞 (0) (𝑋 ) = Î               .                              uniformly random over F.
+                                             𝑘 (𝑋 − 𝑖 )
+                                             𝑙=1       𝑙
+                                                                                            Proof. Recall the Lagrange interpolation polynomial:
+   (4) 𝑎 0 is the coefficient of 𝑓 (𝑟 ) ∈ F sent by the prover at the end                                              𝑛 Ö
+                                                                                                                      ∑︁    𝑋 − 𝑖𝑘
+       of the FRI COMMIT phase. Note that according to the remark                                            𝑓 (𝑋 ) =                𝑧𝑗 .
+       at the end of the FRI section we assume all our instantiations                                                 𝑗=1
+                                                                                                                            𝑖 𝑗 − 𝑖𝑘
+                                                                                                                                       𝑘≠𝑗
+CCS ’22, November 7–11, 2022, Los Angeles, CA, USA.                                                      Assimakis A. Kattis, Konstantin Panarin, and Alexander Vlasov
+
+
+
+
+Figure 2: FRI Transcript. Bold lines separate the adjacent levels of FRI, green blocks illustrate the values that are taken uniformly
+at random, yellow blocks represent the values that are uniquely determined by the coset of the previous layer, while red blocks
+have no impact on the construction of ⟨𝑆⟩.
+
+
+   Fix 𝑥, 𝑖 1, . . . , 𝑖𝑛 and 𝑧 1, . . . , 𝑧𝑛 , 𝑓 (𝑥) as a function of 𝑧 1 equals:        In this case the sets {𝑖 1, . . . , 𝑖𝑘 } and 𝐷 are disjoint. This in turn
+                                                                                      means that a uniformly random distribution of values of 𝑞 (0) (𝑋 )
+                                   𝑓 (𝑥) = 𝑎𝑧 1 + 𝑏.                                          ′
+                                                                                      over 𝐾𝑖 is exactly the same as the uniformly random distribution of
+where 𝑎, 𝑏 - constants ∈ F. Note that:                                                values of 𝑓𝑖 over the same domain (as all other terms in (∗∗) are now
+                            Ö 𝑥 −𝑖                                                    fixed by previous considerations). Plugging in the the requirement
+                                       𝑘
+                        𝑎=               ≠ 0,                                         for 𝑓𝑖 (𝑦) to be also uniformly randomly distributed we arrive at the
+                                𝑖 1 − 𝑖𝑘                                                           ′
+                                     𝑘≠1                                              set 𝐾𝑖 = 𝐾𝑖 ∪ 𝑦 with |𝐾𝑖 | = 𝑟𝑖 + 2 at which the values of 𝑓𝑖 should
+provided 𝑥 being different from all of 𝑖 2, . . . 𝑖𝑛 . For a linear function,         look like random elements in F for 𝑖 ∈ [3].
+the claim follows by the randomness of 𝑧 1 .                               □              Since 𝑇 , 𝑃, 𝑄 are each fully specified by 𝑓1, 𝑓2, 𝑓3 on 𝐷, we need to
+                                                                                      add to 𝐾𝑖 any potential oracle queries in the FRI instances for 𝑇 , 𝑃, 𝑄
+    Consider 𝑠 (01) and 𝑡 (01) (the coset of 𝑡 (1) ). Indeed, at least one            that sampled values for which the 𝑓𝑖 were not already queried.
+of 𝑠 (01) or 𝑡 (01) is unequal to 𝑥 (0) . Without loss of generality as-              Denote the number of these new calls by 𝑟𝑇 , 𝑟 𝑃 , 𝑟𝑄 . Since for all of
+sume 𝑡 (01) ≠ 𝑥 (0) . We use lemma 4 for 𝐼 = {𝑠 (01) , 𝑡 (01) }, 𝑍 =                  𝑇 , 𝑃, 𝑄 queried at a point 𝑔 ∈ 𝐷 the values of 𝑓𝑖 (𝑔) have to also be
+{𝑞 (0) (𝑠 (01) ), 𝑞 (0) (𝑡 (01) )} and 𝑥 = 𝑥 (0) which implies that a uni-            queried if they were not queried already, any potential extra queries
+form distribution of 𝑞 (0) (𝑡 (01) ) results in a uniform distribution for            due to these variables are added to the respective degrees of all
+𝑞 (1) (𝑡 (1) ), independent of the value of 𝑞 (0) (𝑠 (01) ).                          three witness polynomials 𝑓𝑖 . To achieve this property, it is enough
+                                                                                                               ′
+    We proceed by induction through repeated use of lemma 4. To                       to replace 𝑓𝑖 (𝑋 ) by 𝑓𝑖 (𝑋 ) = 𝑓 (𝑋 ) + 𝐻𝑖 (𝑋 )𝑍 (𝑋 ) where 𝐻𝑖 (𝑥) is a
+achieve a uniformly random distribution for 𝑞 (2) (𝑡 (2) ) we need                    random polynomial of degree 𝑟𝑖 + 𝑟𝑇 + 𝑟 𝑃 + 𝑟𝑄 + 1.
+a uniformly random distribution for one of the values from the
+previous level: 𝑞 (1) (𝑠 (12) ) or 𝑞 (1) (𝑡 (12) ). Assume that 𝑠 (12) ≠ 𝑥 (1)        E    FRI PARAMETERS
+(hence satisfying the conditions of lemma 4). The uniform dis-                        As described in the main text of the paper and in particular in
+tribution of 𝑞 (2) (𝑡 (2) ) then follows from the uniformly random                    Section 6, one has the freedom to pick FRI parameters that also
+distribution of one of 𝑞 (1) (𝑠 (12) ) which in turn follows from the                 affect contributions into the soundness error of RedShift due to
+uniform distribution of 𝑞 (0) (𝑠 (02) ). The same logic is then applied               the list size |𝐿|. In general, smaller list sizes will lead to a smaller 𝛿
+for all downstream layers of FRI. This is illustrated in fig. 2.                      parameter (this is intuitively expected, as a larger list size requires
+    Finally, to achieve the same distribution of variables in tran-                   less sensitivity) that in turn reduces FRI soundness for a chosen
+scripts ⟨𝑃, 𝑉 ⟩ and ⟨𝑆⟩ we need to add more “degrees of freedom"                      domain 𝐷, parameter 𝜌 and number of queries. Alternatively, one
+for each witness polynomial 𝑓𝑖 , 𝑖 ∈ [3]. More precisely, we want                     can pick another limit in the FRI soundness formula
+the evaluation:                                                                                                     n                   o            
+                                                                                                𝑝 (𝜌, 𝜈) = 1 − 𝑚𝑖𝑛 𝛿 0, 𝐽𝜈 (𝐽𝜈 (1 − 𝜌)) + 𝜈 log |𝐷 |
+                     𝑞 (0) (𝑠 (0) ), 𝑞 (0) (𝑡 (0) ), 𝑞 (0) (𝑡 (01) ),
+                 𝑞 (0) (𝑠 (02) ), . . . (𝑟𝑖 + 1 values in total)                      and set 𝛿 0 = (1 − 𝜌)/2 to be in the unique decoding radius. In
+                 ′
+                                                                                      this case list size |𝐿| = 1, but FRI has smaller soundness for the
+over the set 𝐾𝑖 = {𝑠 (0) , 𝑡 (0) , 𝑡 (01) , 𝑠 (02) , . . .} on the top level of FRI   same number of queries. This means that one has to pay particular
+to be uniformly random for each 𝑖 ∈ [3]. Now, recall that:                            attention to the final system soundness as described in Section 7:
+                                                                                      for in the case where the sum 𝐴1 + 𝜖𝐹 𝑅𝐼 ∼ 𝐴1 one should also
+                                     𝑓 (𝑋 ) − 𝑈 (𝑋 )                                  consider the case of the limit 𝛿 0 = (1 − 𝜌)/2 in the FRI soundness
+                𝑞 (0) (𝑋 ) = 𝑞(𝑋 ) = Î               . (∗∗)
+                                        𝑘 (𝑋 − 𝑖 )                                    term and can recalculate 𝐴1 and thus a final soundness in case of
+                                        𝑙=1       𝑙
+RedShift: Transparent SNARKs from List Polynomial Commitments                                            CCS ’22, November 7–11, 2022, Los Angeles, CA, USA.
+
+
+list size |𝐿| = 1. Such checks are also important if one would want          number of required FRI queries (as used in [2]) and other estimates
+to reduce the field size for a corresponding reduction in proof size.        for the number of required queries. To the best of our knowledge,
+                                                                             there is no public analysis for such optimizations and we thus do
+F    PROOF SIZE OPTIMIZATIONS                                                not use them in our analysis.
+There are various options that can reduce the proof size. Some of               For completeness we should also mention that for a substantial
+the are described in detail in [20]. There are two essential parts to        number of queries of Merkle path elements that are close to the root
+check satisfiability at the random point 𝑦:                                  are often duplicate between queries and thus it may be beneficial
+                                                                             to send them once, only later sending the values that are missing
+    (1) Consistency between polynomial openings at 𝑦. The prover
+                                                                             to complete the path to the leafs. One can also perform a smaller
+         sends the purported evaluations to the verifier and these
+                                                                             number of FRI “folding” steps and output not just a single coefficient
+         values are used for two subroutines:
+                                                                             of the claimed low degree polynomial, but settle on a larger degree
+       (a) Check the equations from Section 5 at 𝑦.
+                                                                             based on the expected number of queries.
+      (b) Simulate oracles to the quotient function 𝑞(𝑦).
+    (2) Proximity testing performed by the invocation of FRI.
+                                                                             G     BATCHED FRI
+Merging Oracles: As described in [20], the prover can join the                                                                                     [𝑘 ]
+                                                                             Consider the following theorem found in [3]. We define 𝐽𝜈 (𝜆) =
+evaluations of the different polynomials over the domain 𝐷 into
+                                                                             𝐽𝜈 (𝐽𝜈 (· · · (𝐽𝜈 (𝜆)))), where there are 𝑘 iterations of the function 𝐽𝜈 .
+a single oracle by placing the corresponding values into the same
+                                                                             We also denote the relative hamming distance of set 𝑆 ⊆ F𝑛 as
+leaf of the Merkle tree. This reduces the total number of Merkle
+paths required for authentication, which is a bottleneck for proof                         Δ(𝑆) = min{Δ(𝑤, 𝑤 0 )|𝑤, 𝑤 0 ∈ 𝑆, 𝑤 ≠ 𝑤 0 }.
+size. We can perform such a joining operation for the following                  Theorem 8. Let 𝑉 ⊆ F𝑛 be a linear space over a finite field F
+sets of polynomials:                                                                                                                  [𝑙+1]
+                                                                             with Δ(𝑉 ) = 𝜆. Let 𝑢 ∗ ∈ F𝑛 and 𝜖 > 0 satisfy 𝛿 < 𝐽𝜖          (𝜆). For
+    (1) Constraint polynomials: selectors 𝑞𝐿 , 𝑞𝑅 , 𝑞𝑂 , 𝑞𝑀 , 𝑞𝐶 and per-                            𝑛
+                                                                             𝑢 1, 𝑢 2, . . . , 𝑢𝑙 ∈ F define
+        mutation polynomials 𝑆𝑖𝑑1 , 𝑆𝜎1 , 𝑆𝜎2 , 𝑆𝜎3 , as all those are in-                             (           𝑙
+                                                                                                                                   )
+                                                                                                                  ∑︁
+                                                                                                             ∗ ∗
+        dependent and prepared at setup.                                                          𝐴 = 𝛼 ∈ F Δ(𝑢 +     𝑖
+                                                                                                                     𝛼 𝑢𝑖 , 𝑉 ) < 𝛿 .
+    (2) Witness polynomials: 𝑓𝐿 , 𝑓𝑅 , 𝑓𝑂 .                                                                            𝑖=1
+    (3) Grand product polynomials: 𝑃, 𝑄.
+    (4) Polynomials 𝑇0,𝑇1,𝑇2 for which                                       If |𝐴| > 𝑙 · (2/𝜖)𝑙+2 , then ∀𝑗 ∈ [𝑙], ∃𝑣 ∗, 𝑣 𝑗 ∈ 𝑉 such that:
+                                                                                                            𝑙                
+                 𝑇 (𝑋 ) = 𝑋 2𝑛𝑇2 (𝑋 ) + 𝑋 𝑛𝑇1 (𝑋 ) + 𝑇0 .
+                                                                                                                             
+                                                                                      
+                                                                                             ∗    ∗      ©Û             𝑙 ª
+                                                                                                                              
+                                                                                                                              
+                                                                                        𝑖 (𝑢𝑖 = 𝑣𝑖 ) ∧ ­ (𝑢 𝑗 )𝑖 = (𝑣 )𝑖 ® ≥ (1 − 𝛿 − 𝜖)𝑛,
+                                                                                                                             
+   While we initially have to provide 17 independent Merkle paths                     
+                                                                                                         « 𝑗=1
+                                                                                                                              
+                                                                                                                             ¬
+for the authentication of various oracle values, this optimization               where (𝑢 𝑗 )𝑖 denotes the 𝑖-th coordinate of 𝑢 𝑗 and 𝑖 ∈ [𝑛].
+reduces their number to 4, directly reducing proof size and verifi-              In particular, Δ(𝑢 ∗, 𝑣 ∗ ) ≤ 𝛿 + 𝜖 and ∀𝑖 ∈ [𝑙] :
+cation time. This is due to the smaller number of prover-provided
+Merkle paths which imply a smaller number of hash function invo-                                           Δ(𝑢𝑖 , 𝑣𝑖 ) ≤ 𝛿 + 𝜖.
+cations, which are the current verification time bottleneck. Such              Specifying this theorem for 𝑉 = RS[F, 𝐷, 𝜌] (for which 𝜆 =
+an argument universally applies to all the optimization described            Δ(𝑉 ) = 1 − 𝜌), the contrapositive yields the following corollary:
+below that also reduce proof sizes.
+                                                                                 Corollary 1. Let 𝑉 = RS[F, 𝐷, 𝜌] be the family of RS-codes.
+                                                                                                                           [𝑙 ]
+Bitreversed Domain Element Enumeration as Merkle Tree                        Let 𝜖 ∈ (0, 1), 𝛿 > 0 satisfy 𝛿 < 𝐽𝜖 (1 − 𝜌). Let 𝑙 ≥ 2 ∈ N and
+Leaves: Another important optimizations for FRI is to use “bitre-            𝑢 1, 𝑢 2, . . . , 𝑢𝑙 ∈ F𝑛 , such that there exists 𝑖 ∈ [𝑙] for which Δ(𝑢𝑖 , 𝑉 ) >
+verse” enumeration when placing the claimed LDE values into the              𝛿 + 𝜖. Then it holds that:
+                                                                                                                              𝑙+1
+Merkle tree. In this case, values that form the coset required for the                                                        2
+FRI “folding” step are always adjacent and can thus be placed in                                             |𝐴| ≤ (𝑙 − 1)          .
+                                                                                                                              𝜖
+the same leaf (combined with the optimization below), sharing a
+single Merkle path per FRI intermediate oracle query step. We do                We sketch a batched FRI protocol, the correctness of which is a
+not use this optimization in the prototype implementation.                   trivial consequence of the previous corollary.
+
+Concatenating Merkle Tree Leaves: We can place more values                   Batched FRI protocol:
+into the leaves of every Merkle tree used to instantiate the oracles.          (1) P publishes oracles to 𝑓1, . . . , 𝑓𝑘 .
+This optimization allows us to use a larger ‘localization parameter’           (2) V selects random 𝛼 ∈ F∗ and sends it to P.
+                                                                               (3) P and V perform FRI w.r.t 𝑓 = 𝑘𝑖=1 𝛼 𝑖 −1 𝑓𝑖 .
+                                                                                                                       Í
+for FRI and thus reduce the number of intermediate oracles. In
+practice implementations follow an adaptive strategy where the                 (4) V accepts if the previous step accepts.
+localization parameter is large (usually 8) for the initial FRI stages
+when the Merkle path is “long” and decreases it when the tree
+becomes more shallow.
+   Other optimizations exist: e.g. performing proof-of-work on
+top of challenge values obtained from the transcript to reduce the
+
