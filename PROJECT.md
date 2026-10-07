@@ -250,6 +250,16 @@ Done: Phase 0–2 (restore, compile, shared circuit suite 30/30); security fix A
 
 **After "sound + ZK"** → see **"Follow-ups (after fixes A–C)"** below (F1–F12, prioritized).
 
+**Next steps (decided order, 2026-10-07)** — all of fixes A–C are merged (PRs #1–#7); master is green.
+1. **F3 concurrency** (small, concrete): `nativefri.Scheme` takes a hash constructor; red-first test = parallel Prove/Verify on one VK under `go test -race`.
+2. **F2 serialization** (needed for any real use): `WriteTo`/`ReadFrom` for Proof and VK with canonical decoding; round-trip test, size = `proofSize`, fuzz test that never panics.
+3. **F4 malicious-prover harness**: consolidate the existing cheating hooks into one helper; add the missing cheaters (pointwise-H, broken copy constraint, wrong z(ω·ζ), wrong public row, swapped h pieces) — each 0/N with the rejecting check recorded.
+4. **F5** HK24 87-vs-173 written reconciliation (reading, no code unless airtight).
+5. Then cost (F6 size, F7 prover time — profile first), F9 PQ-target reading, F10 Phase 3.
+- In parallel, outside the code: **F1 external review** — PROJECT.md (designs B1/C1, security table, lessons) + the attack/ZK tests are the claims to hand over.
+
+**Development paused 2026-10-07** for a supervisor presentation. Resume at item 1 (F3). Presentation deck (decisions, arguments, benchmarks): https://claude.ai/artifact/PWgnNpgaFTsa8dXZqFtcZP
+
 ## Follow-ups (after fixes A–C) — recorded 2026-10-07
 
 Status at this point: plonkfri on bn254 is sound (fix A + B) and honest-verifier zero-knowledge (fix C) by construction, with a test per mechanism; **not externally reviewed**. Items are grouped by when they matter; within a group, roughly by priority. Each has a "done when" so it can be worked test-first like A–C.
@@ -561,3 +571,10 @@ Measured per-query acceptance of garbage = 1/8 = ρ, i.e. the conjectured regime
 ### 2026-10-07 (cont.) — follow-ups documented
 - New section "Follow-ups (after fixes A–C)": F1–F12 grouped as before-real-use (review, serialization, concurrency), robustness (malicious-prover harness, HK24 87-vs-173), cost (size, prover time, tiny circuits), research (PQ target), later phases (in-circuit verifier, features, housekeeping). Each with why / approach / "done when", so the next work can start test-first.
 - Branch `pq-pcs-followups` (stacked on PR #6, which was still open).
+
+### 2026-10-07 (cont.) — next steps fixed
+- PRs #6 (fix C) and #7 (follow-ups) merged. Order decided: F3 → F2 → F4 → F5 → cost/research/Phase 3; F1 review in parallel. Recorded under "Open questions / next steps".
+
+### 2026-10-07 (cont.) — development paused, presentation prepared
+- Development stopped at the user's request; all work merged to `master` (PRs #1–#7 plus this docs PR). Resume at F3 (see "Next steps").
+- Supervisor deck, cut to 8 slides at the user's request: four decision gates (security target, FRI query count, out-of-domain ζ, zero-knowledge), each as problem → academic study → implementation → measured outcome; plus context, benchmarks vs KZG at 65k, status/next steps. Speaker notes carry the reasoning. Link under "Next steps".
