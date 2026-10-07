@@ -49,6 +49,11 @@ const rho = 8
 // ρ, and 43 queries would suffice.) See PROJECT.md and resources/.
 const nbQueries = 86
 
+// NbQueries is the number of FRI query rounds of a proof. Each reveals the
+// committed polynomials at two points (x, −x), which zero-knowledge blinding
+// must account for.
+const NbQueries = nbQueries
+
 // 2^{-1}, used several times
 var twoInv fr.Element
 

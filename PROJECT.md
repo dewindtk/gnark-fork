@@ -156,7 +156,7 @@ Replay Fiat-Shamir from the proof's published roots + public inputs to get `beta
 
 ## Security status (current state — read before using or extending plonkfri)
 
-**Sound (fix B landed 2026-10-07), not yet zero-knowledge.** All known forgeries are rejected (attack tests: 0/800, 0/200). Proofs still leak information about the witness (concern 3, fix C) — do not use with secrets until C lands, and the code has had no external review. Details, measurements and reasoning are in the 2026-10-07 session-log entries below.
+**Sound (fix B) and zero-knowledge (fix C), as of 2026-10-07 — not externally reviewed.** All known forgeries are rejected (attack tests: 0/800, 0/200, 0/50); the values a verifier sees are uniformly random by HK24 Lemma 1/2/4, checked structurally by `TestRevealedValuesAreUniform`. ZK is honest-verifier in the IOP, NIZK after Fiat-Shamir (random-oracle model). Unreviewed research code: do not rely on it for real secrets. Details, measurements and reasoning are in the 2026-10-07 session-log entries below.
 
 A FRI-PLONK proof rests on two promises: (1) every committed table is a low-degree polynomial — FRI's job; (2) those polynomials satisfy the circuit identity, checked at one random point `zeta` — PLONK's job. Soundness is the *weakest* of the checks, so every one must reach the target.
 
@@ -165,13 +165,13 @@ A FRI-PLONK proof rests on two promises: (1) every committed table is a low-degr
 | 1 | FRI checked **1 query** per proof (`nbRounds = 1`) | FRI (`internal/nativefri`) — all 18 commitments | Garbage accepted ~1/8 → ~3 bits; e.g. a pointwise `H = F/Z_H` table passes PLONK at every `zeta`, only FRI could catch it | ✅ Fixed (A): fold once, **86 queries** = 128-bit proven (Johnson bound, ρ=1/8, `s = 2λ/log₂(1/ρ)`) |
 | 4 | `VerifyOpening` never tied `ClaimedValue` to the Merkle-authenticated leaf | FRI opening ↔ PLONK final check | Cheater claims any value at `zeta` (solve for `h`) → forgery with probability 1 | ✅ Fixed (A): `ErrClaimedValue` |
 | 2 | `zeta` drawn from the 16n-point FRI domain, not the whole field | PLONK final check (`prove.go`/`verify.go`) | Schwartz–Zippel escape up to ~19%; 1/16 of positions put `zeta` in the circuit domain (`Z_H(zeta)=0`) → honest low-degree polys for a witness breaking one gate pass ~1/16. **Measured 2026-10-07** (`attack_test.go`, red until fix B): false statement "X²=5" (5 is a non-square) accepted **36/800 = 4.5%**, all with ζ ∈ H; predicted 1/16·(n−1)/n = 4.69% for n=4 | ✅ Fixed (B): `zeta ∈ F \ (D' ∪ H)`, all values opened by one batched DEEP-FRI. Same attack after B: **0/800** accepted (all rejected by the identity check); solving `h1(zeta)` from the identity and opening the lie: **0/200** (all rejected by FRI folding) |
-| 3 | Blinding (2 coeffs L/R/O, 3 for Z) vs values revealed by queries + openings | PLONK prover blinding (`prove.go`) | Zero-knowledge (privacy) only, not soundness; with 86 queries it clearly leaks | ❌ Open — fix **C**: blinding degree ≥ number of revealed evaluations + a separate blinding polynomial in the FRI batch (Haböck §3.7); depends on final query/opening design from B |
+| 3 | Blinding (2 coeffs L/R/O, 3 for Z) vs values revealed by queries + openings | PLONK prover blinding (`prove.go`) | Zero-knowledge (privacy) only, not soundness; with 86 queries it clearly leaks | ✅ Fixed (C): l/r/o/z blinded with 174 random coefficients, h1/h2/h3 split randomized (173), mask R in every FRI opening. `TestRevealedValuesAreUniform`: full rank on all revealed points (was rank 2–3 vs ~160 points) |
 | 5 | FRI domain is a subgroup ⊇ circuit domain H (no coset shift) | FRI domain (`nativefri.newRadixTwoFri`) | ZK only: queries landing in H (1/16) reveal raw wire values, blinding vanishes there. **Measured 2026-10-07:** 60-secret-wire circuit, one proof → L/R/O each reveal 172 codeword values, of which 9/5/11 are raw secret wire values (expected 172/16≈11) | ✅ Fixed (B): FRI on coset `a·D`; regression test: 0 of 516 revealed values are secret wire values |
 | 6 | Transcript doesn't bind the verifying key / circuit | Fiat-Shamir in `prove.go`/`verify.go` | "Weak Fiat-Shamir" class [DMWG23]; matters if the VK can be chosen adversarially | ✅ Fixed (B): VK digest + public inputs bound first; the batched opening's transcript also binds every root and claim |
 
 Parameter choice (decided 2026-10-07): **proven** 128-bit, not conjectured. Rationale: once FRI folds once, query count costs only proof size/verify time, not prover time (RedShift §6–7), and the proven regime keeps knowledge-soundness extractable. Conjectured alternative (43 queries, ~half the size) remains an opt-in for later. Sources: `resources/2020-654.pdf` §3.2/§8 (2λ/log(1/ρ) proven for q ≫ n²; λ/log(1/ρ) conjectured), `resources/2019-1400.pdf` Table 1, `resources/Revision2OfTR17-134.pdf` Thm 3.3 / Conj. 1.5.
 
-Lessons that generalize: (a) passing honest-proof tests says nothing about soundness — every check needs a test that a *cheating* prover is rejected; (b) any value the verifier uses must be bound to something it verified (here: `ClaimedValue` ↔ leaf, `ID` ↔ `Roots[0]`, layer sizes computed not trusted); (c) measure acceptance rates empirically — the 1/8 measurement exposed concern 1 before the theory did. From fix B: (d) write the attack test *before* the fix and check its measured rate against a prediction (36/800 vs 4.69% predicted) — a match confirms the cause, not just a correlation; (e) record *which* check rejects each cheater: the in-domain-zeta forgery is caught by the identity check, the lie-at-zeta by FRI folding, so each defence is shown to do its own job (tampering with transcript inputs is caught indirectly — query positions move — and does not test folding); (f) anything prover and verifier must agree on (claim order → batching coefficients, transcript order) comes from one shared function, not two copies; (g) estimate before measuring (0.9 MB estimated, 0.84 MB measured) so surprises are visible.
+Lessons that generalize: (a) passing honest-proof tests says nothing about soundness — every check needs a test that a *cheating* prover is rejected; (b) any value the verifier uses must be bound to something it verified (here: `ClaimedValue` ↔ leaf, `ID` ↔ `Roots[0]`, layer sizes computed not trusted); (c) measure acceptance rates empirically — the 1/8 measurement exposed concern 1 before the theory did. From fix B: (d) write the attack test *before* the fix and check its measured rate against a prediction (36/800 vs 4.69% predicted) — a match confirms the cause, not just a correlation; (e) record *which* check rejects each cheater: the in-domain-zeta forgery is caught by the identity check, the lie-at-zeta by FRI folding, so each defence is shown to do its own job (tampering with transcript inputs is caught indirectly — query positions move — and does not test folding); (f) anything prover and verifier must agree on (claim order → batching coefficients, transcript order) comes from one shared function, not two copies; (g) estimate before measuring (0.9 MB estimated, 0.84 MB measured) so surprises are visible. From fix C: (h) privacy can't be tested by sampling (every 254-bit value looks random) — test the structural condition the proof relies on (full rank of the blinding map on the revealed points), red first; (i) demonstrate a design rule by showing the attack it prevents succeeding without it (crafted mask: 50/50 unsafe vs 0/50), and make the test fail if the attack stops working, so it can't become vacuous; (j) re-derive a formula on the *old* parameters and match the old code before using it with new ones (piece size n+2 ✓ → n+231); (k) when a struct gains a field, check every copy helper (mask `clone()` bug); (l) to measure old behaviour, use a `git worktree` at the old commit, not `git stash`.
 
 ## Literature basis for the security plan (checked 2026-10-07)
 
@@ -242,18 +242,22 @@ Done: Phase 0–2 (restore, compile, shared circuit suite 30/30); security fix A
 - **B2 done (2026-10-07):** `internal/nativefri/batch.go` (`Scheme`, `Commit`, `Open`, `Verify`) + `batch_test.go`, alongside the old API (removed in B3). 
 - **B3 done:** setup/prove/verify on `Scheme`; old per-polynomial `nativefri` API removed. B4 tests: in-domain-zeta forgery 0/800, lie-at-zeta 0/200, witness-leak 0/516.
 
-**Step 2 — Fix C: blinding vs revealed evaluations (zero-knowledge).** Also add a separate random blinding polynomial to the FRI batch (consideration 2, [HK24]). After B the exact count is known: each committed poly is revealed at ~2·86 FRI positions + its `zeta` openings → blinding degree must be ≥ that; FRI degree bound/domain sizing must absorb it. RedShift samples outside D for perfect ZK — check §6.
+**Step 2 — Fix C: zero-knowledge. C1 design drafted 2026-10-07 — see "Fix C design (C1)" below; decisions 1–3 approved (173, mask always on, larger tiny proofs). C2 red test written 2026-10-07 (`zk_test.go`, fails as intended). C3 done (mask R in nativefri). C4 done (blinding + randomized split; `TestRevealedValuesAreUniform` green). C5 done. ✅ Fix C complete.** Original note: Also add a separate random blinding polynomial to the FRI batch (consideration 2, [HK24]). After B the exact count is known: each committed poly is revealed at ~2·86 FRI positions + its `zeta` openings → blinding degree must be ≥ that; FRI degree bound/domain sizing must absorb it. RedShift samples outside D for perfect ZK — check §6.
 
 **Decided — security target (consideration 4):** option (a), classical 128 bits + "plausibly PQ" (see Design decisions). To revisit: explicit PQ target after reading [CMS19] / Chiesa–Yogev / NIST PQC criteria; optional grinding to trade queries for prover work.
 
-**Step 3 — Malicious-prover test harness.** A reusable way to build deliberately bad proofs (lying openings, pointwise-H, bad-gate witness) so every soundness claim has a test that a cheater fails. Partly built during B4.
+**Step 3 — Malicious-prover test harness.** A reusable way to build deliberately bad proofs (lying openings, pointwise-H, bad-gate witness) so every soundness claim has a test that a cheater fails. Largely built during B4/C3: `prove(…, transcriptPublic)`, `testHookBeforeOpen`, `Scheme.commit`/`commitEvals`/`open(…, mask)`, `firstClaimPower`. Remaining: collect them behind one documented test helper; add pointwise-H and wrong-permutation cheaters.
 
 **After "sound + ZK"** (pick by priority):
 - Proof serialization (`WriteTo`/`ReadFrom`) — none exists; needed for any real use.
 - Size/speed: Merkle path dedup / caps, parallel hashing.
 - Phase 3: port fix A/B to the in-circuit gadget, Poseidon2, recursive verifier.
 - Features: BSB22 commitments, more curves.
-- Housekeeping: `playground_test.go` (keep/delete?), `internal/stats/generate/main.go`.
+- Housekeeping: `internal/stats/generate/main.go`.
+- Concurrency: `nativefri.Scheme` holds one `hash.Hash` → a VK can't be shared across goroutines; use a hash constructor.
+- Tiny circuits: ZK blinding sets DegreeBound ≥ 512 (2-constraint proof 0.43 MB); could size blinding by the actual domain (fewer distinct query points when |D| is small) if it matters.
+- Reconcile HK24's quotient-randomizer count (87) with ours (173) — C.7 point 1.
+- External review of fixes A–C before any real use.
 
 ## Fix B design (B1) — approved 2026-10-07
 
@@ -323,6 +327,73 @@ KZG PLONK at 65534 for reference: setup 0.16 s, prove 0.65 s, verify 1.3 ms, pro
 1. **D5 multi-poly leaves** — recommended; the alternative (one tree per poly) is a smaller diff but keeps ~15 Merkle paths per query.
 2. **D1 on ζ ∈ D' ∪ H**: reject (honest prover fails with prob ~2^-230) vs re-derive with a counter. Recommended: reject — simpler, standard.
 3. FRI code is 2× larger than needed (degrees ~n+3 force k = 2n). Accept for now; optimization later (e.g. smaller blinding or splitting).
+
+## Fix C design (C1) — drafted 2026-10-07, decisions approved
+
+### C.0 The problem, in one paragraph
+Zero-knowledge means: everything the verifier sees could have been produced without the witness. The verifier sees each secret polynomial (l, r, o, z, h1–h3) at up to **174 points** — ζ, ω·ζ (z only), and the pair {x, −x} of each of the 86 FRI queries — plus every folded FRI layer value. Today l, r, o carry 2 random coefficients, z 3, h1–h3 none, and the FRI layers have no mask. After fix B the raw-wire leak on H is gone (0/516), but the revealed values are still functions of the witness with far too little randomness to hide it.
+
+### C.1 The idea, and why it works (HK24 Lemma 1)
+Blind a witness polynomial as `ŵ(X) = w(X) + Z_H(X)·r(X)` with r uniformly random with `b` coefficients. On H nothing changes (`Z_H = 0` there), so the circuit identity still holds. At any revealed point x ∉ H, `ŵ(x) = w(x) + Z_H(x)·r(x)`. If there are m ≤ b distinct revealed points, the map `r ↦ (Z_H(xᵢ)·r(xᵢ))ᵢ` is a (scaled) m×b Vandermonde map of **full rank m** — so it hits every vector of values equally often, and the revealed values are uniformly random **whatever w is**. That is the whole argument; it needs (1) points outside H (fix B's coset + ζ ∉ H) and (2) `b ≥ number of distinct revealed points`. Source: `2024-1037` Lemma 1 (with e = 1: we work in the base field, no extension), RedShift `2019-1400` App. D.3.
+
+The same idea is applied twice more: to the quotient pieces (they are revealed too, `2024-1037` §4.1, Lemma 4) and to the FRI folding layers via a mask polynomial (`2024-1037` Protocol 2, Lemma 2) — blinding the inputs does not protect the folds, because each fold halves the randomizer space (`Z_H` is even, so `Z_H·F[X]<b` folds into `Z_{H²}·F[X]<b/2`) while the witness part keeps its structure (`2024-1037` §2).
+
+### C.2 Protocol changes
+1. **Witness blinding (C-a):** l, r, o, z: `ŵ = w + Z_H·r`, r with **b = 174** random coefficients (was 2 / 3).
+2. **Randomized quotient split (C-b):** h = h1 + Xᵏ·h2 + X²ᵏ·h3 (canonical split, k = piece size). Prover draws t1, t2 with **173** random coefficients and commits `ĥ1 = h1 + Xᵏ·t1`, `ĥ2 = h2 + Xᵏ·t2 − t1`, `ĥ3 = h3 − t2`. The sum telescopes back to h, so the verifier's equation is unchanged (`2024-1037` §4.1 eq. (8); GWC19 for the 1-coefficient version).
+3. **Mask polynomial (C-c):** inside `nativefri.Scheme.Open`, before λ: the prover samples R uniformly with `DegreeBound − 1` coefficients, commits it (own Merkle tree), binds its root into the transcript, and runs FRI on `R + Σₜ λᵗ⁺¹·(fₜ − vₜ)/(X − zₜ)`. The verifier opens R at each query like any commitment.
+
+### C.3 Design decisions
+| # | Decision | Why | Source |
+|---|---|---|---|
+| C1 | b = 174 for l, r, o, z | Distinct revealed points: z: ζ, ωζ, ≤ 2·86 FRI points = 174; l, r, o: 173. One value for all = HK24's bound `2·(e·n_F + n_D)` = 2·(1+86) = 174 — independent derivation and paper agree | `2024-1037` eq. (10), Lemma 1 |
+| C2 | t1, t2 with **173** coefficients (user decision) | h pieces are revealed at ζ + ≤ 172 FRI points = 173. HK24 eq. (9) only asks `n_F + n_D` = 87 — likely counts one point per FRI query, while our FRI reveals the pair {x, −x}. Not reconciled → take the count that is certainly sufficient; cost is ~173 coefficients per piece | `2024-1037` §4.1, Lemma 4; own count |
+| C3 | Mask R **always on** in `Scheme` (user decision) | PLONK is the only user and must be ZK; one code path, no flag to forget. Cost: one tree + 86 pair openings | `2024-1037` Protocol 2 step 1 |
+| C4 | R committed **before λ**, coefficient 1; claims get λ¹, λ², … (today λ⁰, λ¹, …) | If R shared a coefficient with a claim, a cheater could commit a non-low-degree "R" = (low-degree P) − (false quotient Q₀): FRI only sees R + Q₀ = P and accepts. Distinct powers + R bound before λ → correlated agreement applies to R and each quotient separately | `2024-1037` eq. (2) (claims start at λ¹); found while deriving C-c |
+| C5 | R has `DegreeBound − 1` coefficients | The decoupling argument needs R uniform over the whole space the quotients live in (degree < DegreeBound − 1), so R + (quotients) is uniform there regardless of the witness | `2024-1037` Lemma 2 (`R ∈ F[X]<|H|+h−1`) |
+| C6 | Sizes become computed VK parameters: piece size k, quotient domain, DegreeBound; k and DegreeBound in `vk.digest()` | Today `n+2` is hard-coded in setup, prove and verify (the tiny-circuit bug came from such a coupling). One computation, bound into the transcript → prover and verifier cannot disagree | lesson from `minDomainSize`, D10 |
+| C7 | Accept larger proofs for tiny circuits (DegreeBound ≥ 512) (user decision) | Blinding adds ~400 coefficients regardless of n; for n ≥ 512 the bound stays 2n | — |
+| C8 | Preprocessed polys stay unblinded | They are public | — |
+| C9 | No extra measure for the permutation-argument leak | Reveals only "β, γ ≠ special values"; statistical, negligible in a 254-bit field; perfect ZK would need more | `2024-1037` App. A |
+
+### C.4 Parameters and degrees (n = |H|, b = 174, t = 173)
+- l̂, r̂, ô, ẑ: n + b coefficients.
+- Identity numerator degree: max of gate `qm·l·r` (3n + 2b − 3) and permutation `z(ωX)·∏(l + β·s + γ)` (**4n + 4b − 4**). Divided by Z_H (degree n): **deg h = 3n + 4b − 4**, i.e. 3n + 4b − 3 coefficients. (Check against today, b = 2/3: 3n + 6 coefficients → pieces n + 2 ✓.)
+- Piece size: k = ⌈(3n + 4b − 3)/3⌉ = **n + 231** (exact count, implemented in `setup.go:sizes`; HK24's simpler k̂ = n + ⌈4b/3⌉ gives n + 232 — one more than needed).
+- Randomized pieces: ĥ1, ĥ2 have k + t = **n + 404** coefficients — the largest committed polynomials.
+- `DegreeBound = NextPow2(n + 404)`: n = 4 → 512; n = 512 → 1024 = 2n; n ≥ 512 → 2n (unchanged from today).
+- Quotient domain: |Domain[1]| = NextPow2(3k) (must exceed deg h): n = 65536 → 4n (unchanged); small n larger.
+- Mask R: DegreeBound − 1 coefficients.
+
+### C.5 Code plan
+- **C2 (red first):** constants `nbBlindWitness`, `nbBlindQuotient` introduced in `prove.go` *with today's values* (behaviour unchanged); `nativefri` gains `(*Scheme).QueriedPoints(...)` (replays the transcript, returns the layer-0 points a proof reveals). Test `TestRevealedValuesAreUniform`: for a real proof, per secret polynomial, collect distinct revealed points, build the matrix `[Z_H(xᵢ)·xᵢʲ]` (j < blinding coefficients) and require **full row rank** (Lemma 1's exact condition) — fails today. Plus a check that the committed polys really have n + b coefficients (the test must measure what the prover does, not just a constant).
+- **C3 `nativefri`:** mask R in `Open`/`Verify`; claims shifted to λ¹…; `BatchProof` gains `Mask` root + per-query opening. Tests: completeness; R tampering rejected; the C4 attack (R = P − Q₀ with false Q₀) rejected 0/100; B2 cheater tests still 0/100.
+- **C4 `plonkfri`:** blinding b = 174; randomized split with k; `Setup` computes k, Domain[1], DegreeBound (C6); verifier RHS uses ζᵏ instead of ζⁿ⁺².
+- **C5:** rank test green; attack tests 0/800, 0/200; leak 0; suite 30/30 + tiny 200; perf.
+
+### C.6 Expected cost (estimates before coding)
+- Proof size: + mask tree openings ≈ 86 × (2·32 B + 19·32 B path) ≈ **+58 KB at 65k** (→ ~0.90 MB), ≈ +47 KB at 4k (→ ~0.65 MB).
+- Prove time at 65k: same domains (DegreeBound and quotient domain unchanged); + one commitment of R (FFT on |D| + Merkle) → **~+5–10 %** (~2.1 s).
+- Tiny circuits (n = 4): DegreeBound 8 → 512, |D| 64 → 4096 → proofs of a few hundred KB, ms-level time.
+- Soundness unchanged: 86 queries, ρ = 1/8 (rate is defined by DegreeBound, which only grows for tiny n with |D| = 8·DegreeBound).
+
+### C.8 Results (measured 2026-10-07, after C5)
+| | before fix C (after B) | after fix C |
+|---|---|---|
+| Rank test (revealed points / random coefficients / rank) | l,r,o 159 / 2 / 2; z 160 / 3 / 3; h 159 / 0 / 0 — **fails** | l,r,o 171 / 174 / 171; z 172 / 174 / 172; h 171 / 173 / 171 — **full rank** |
+| Same statement opened twice | identical FRI layers | no shared layer root or final value |
+| Crafted mask cancelling a false claim | — | 0/50 (50/50 in the unsafe shared-λ⁰ variant) |
+| Attacks (zeta in domain / lie at zeta) | 0/800, 0/200 | 0/800, 0/200 |
+| 65534 constraints: setup / prove / verify / proof | 0.75 s / 1.97 s / 4.5 ms / 0.84 MB | 0.79 s / 2.10 s / 4.9 ms / **0.90 MB** |
+| 4094 constraints | 49 ms / 122 ms / 2.6 ms / 0.60 MB | 50 ms / 132 ms / 2.8 ms / 0.64 MB |
+| 2 constraints | ~0 / ~0 / 1 ms / 0.19 MB | 4 ms / 10 ms / 2 ms / 0.43 MB |
+
+Estimates (C.6) vs measured: +58 KB vs +60 KB at 65k; +5–10 % prove vs +7 %; tiny "few hundred KB" vs 0.43 MB.
+
+### C.7 Open points
+1. Reconcile HK24 eq. (9)/(10) counting of FRI query points (one vs pair) — affects only whether 173 could be 87 later.
+2. ZK is *honest-verifier* in the IOP; with Fiat-Shamir it becomes NIZK in the random-oracle model (standard; BCS) — no extra work, noted for the write-up.
+3. Prover randomness comes from `fr.SetRandom` (crypto/rand) — fine; a deterministic RNG would break ZK.
 
 ## Session Log
 
@@ -424,3 +495,38 @@ Measured per-query acceptance of garbage = 1/8 = ρ, i.e. the conjectured regime
 - Perf/size measured (B.5 table): 65k constraints prove 6.8 s → 1.97 s, verify 69 → 4.5 ms, proof ≈ 0.84 MB (estimate 0.9).
 - Known caveat: `Scheme` holds one `hash.Hash`, so a VK must not be used by concurrent goroutines (same as before B). Fix with a hash constructor when needed.
 - Next: fix C (zero-knowledge): blinding degree vs ~2·86 revealed points + ζ openings, mask polynomial R in the batch (HK24 Protocol 2), randomized quotient pieces.
+
+### 2026-10-07 (cont.) — C1: fix C design
+- Read `2024-1037` Protocol 1–3, Lemma 1–2, §4.1 (canonical split randomization, Lemma 4). §4.1 is exactly our h1/h2/h3 split.
+- Derived parameters from first principles and compared with the paper: witness blinding b = 174 (own count = HK24 eq. (10)); quotient randomizer 173 (own count) vs HK24's 87 — unreconciled (one vs two points per FRI query); user chose 173. Mask always on; tiny circuits get DegreeBound ≥ 512 (user decisions).
+- **Found while deriving:** the mask R must not share the coefficient λ⁰ with the first claim — otherwise a cheater commits "R" = P − Q₀ for a false quotient Q₀ and FRI, which only sees R + Q₀, accepts. Claims move to λ¹, λ², … (as in HK24 eq. (2)); a test for this attack is planned in C3.
+- Degree check of the derivation against today's code (b = 2/3 → pieces n+2 ✓) before trusting it for b = 174.
+- Testing choice: ZK can't be tested statistically (every 254-bit value looks random); test the structural condition of Lemma 1 (full rank of the blinding map on the revealed points) instead, red first.
+
+### 2026-10-07 (cont.) — C2: zero-knowledge test, red first
+- Behaviour-preserving refactors first (all tests green after them): `nativefri.(*Scheme).QueriedPoints` (shares the transcript replay with `Verify` via `replay`, so it can't drift); blinding sizes as named constants `nbBlindLRO=2`, `nbBlindZ=3`, `nbBlindQuotient=0`; the hard-coded `n+2` piece size now lives only in `vk.pieceSize()` (prover split + verifier RHS).
+- `TestRevealedValuesAreUniform` checks HK24 Lemma 1's exact condition on a real proof: per secret polynomial, the matrix `[B(xᵢ)·xᵢʲ]` over the distinct revealed points (B = Z_H for l/r/o/z, Xᵏ for h1/h2) must have full row rank. Also checks the prover really outputs n + b coefficients (measures the prover, not a constant). `TestRank` sanity-checks the elimination helper on Vandermonde matrices.
+- **Result (red, as intended):** l/r/o revealed at 159 points with rank 2; z 160 points, rank 3; h1/h2 159 points, rank 0.
+- Observation: 159, not 173 — queries are drawn with replacement and this circuit's FRI domain has 512 pairs, so ≈ 86·85/(2·512) ≈ 7 collide → 1 + 2·(86 − 7) ≈ 159 predicted, 159 measured. Large circuits collide less, so the 173/174 bound is still what's needed.
+
+### 2026-10-07 (cont.) — C3: mask polynomial R in `nativefri`
+- Order: plumbing with the mask *off* (internal `open(…, mask)`, claims moved to λ¹, λ², …) → all tests green except the known C2 red test → mask tests written → `TestMaskRandomizesOpening` red (no mask) → mask switched on in `Open` (R with DegreeBound − 1 random coefficients, own Merkle tree, root bound before λ; `Verify` requires it) → green.
+- **Decision C4 demonstrated, not just argued:** `TestMaskCannotCancelFalseClaim` commits a crafted "R" = P − E that cancels a false claim's error term E. With R sharing λ⁰ with the first claim (`firstClaimPower = 0`, unsafe): **50/50 accepted**. With our design (claims at λ¹…): **0/50**. The test also fails if the attack stops working in the unsafe variant, so it can't silently become vacuous.
+- With the mask: two openings of the same statement share no FRI layer root or final value (fresh randomness in every fold); mask root/row tampering and a missing mask are rejected; B2 cheater tests unchanged (0/100, 0/100); PLONK attack tests unchanged (0/800, 0/200), leak 0/516.
+- Test bug found: the tampering test's proof `clone()` didn't copy the new `Mask` field → index panic. Fixed the helper; lesson: when a struct gains a field, check every deep-copy helper.
+- Measured vs estimate (C.6): proof 65k 0.84 → **0.90 MB** (+60 KB, est. +58 KB); 4k 0.60 → 0.64 MB (+40 KB, est. +47 KB); prove 65k 1.97 → 2.07 s (+5 %, est. 5–10 %).
+- Still red: `TestRevealedValuesAreUniform` (witness blinding + quotient split are C4).
+
+### 2026-10-07 (cont.) — C4: blinding and randomized quotient split in `plonkfri`
+- Blinding constants derived in code from `nativefri.NbQueries` (exported): l/r/o/z 2·(1+86) = 174, quotient randomizers 1 + 2·86 = 173.
+- One `sizes(n)` in `setup.go` replaces three hard-coded rules (FRI bound `n+3`, quotient domain 4n/8n, pieces `n+2`): piece size k = ⌈(3n + b_Z + 3·b_LRO − 3)/3⌉, DegreeBound = NextPow2(max(k + 173, n + 174)), quotient domain = NextPow2(3k). **Checked the formula against the old values first** (b = 2/3 → k = n+2 ✓) before trusting it at 174. Exact count gives k = n+231; the design's HK24-based estimate said n+232 — doc corrected. `PieceSize` stored in the VK and bound in its digest.
+- Randomized split: ĥ1 = h1 + Xᵏt1, ĥ2 = h2 + Xᵏt2 − t1, ĥ3 = h3 − t2 (telescopes to h; `TestRoundTrip` and the suite confirm the verifier's equation is unchanged).
+- **`TestRevealedValuesAreUniform` green:** l/r/o 171 points / 174 coefficients / rank 171; z 172/174/172; h1,h2 171/173/171. (171 vs 159 before: the tiny circuit's FRI domain grew 1024 → 4096 points, fewer query collisions.)
+- All other tests green: attacks 0/800 and 0/200, leak 0/516, mask 0/50, suite 30/30 (+2 skipped), tiny 200, nativefri 10/10.
+- Measured: 65k and 4k unchanged vs C3 (DegreeBound stays 2n) — 65k: prove 2.15 s, verify 4.2 ms, 0.90 MB. Tiny circuit (2 constraints): proof 0.19 → 0.43 MB, prove ~0 → 10 ms (decision C7, as estimated). Side effect: the 800-attempt attack test went 1.0 s → 8.8 s for the same reason.
+- Measuring the pre-C4 tiny size needed the old code: done in a temporary `git worktree` at the C3 commit (a `git stash` attempt measured nothing — the stashed code lacked the tiny case).
+
+### 2026-10-07 (cont.) — C5: fix C complete
+- Final run: whole-repo build + every test package compiles; vet/gofmt clean; nativefri 10/10, suite 30/30 (+2 skipped), tiny 200, bn254 all green incl. attacks (0/800, 0/200), mask (0/50), leak (0/516), rank test (full rank).
+- Results table in "Fix C design" C.8; lessons (h)–(l) added to "Lessons that generalize"; next steps updated (Step 3 harness mostly exists; concurrency, tiny-circuit sizing, HK24 87-vs-173, external review added).
+- Status: plonkfri on bn254 is sound and (honest-verifier) zero-knowledge by construction, with tests for each mechanism; not externally reviewed.

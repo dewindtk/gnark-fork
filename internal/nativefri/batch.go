@@ -53,6 +53,12 @@ type Scheme struct {
 
 	// points[i] is the point of a·D at sorted position i (see sort).
 	points []fr.Element
+
+	// firstClaimPower is the power of λ of the first claim in the batch:
+	// q = R + Σₜ λ^(firstClaimPower+t)·(fₜ − vₜ)/(X − zₜ). It must be ≥ 1 so the
+	// mask R (coefficient λ⁰ = 1) shares no coefficient with a claim; tests set
+	// it to 0 to demonstrate the attack this prevents (PROJECT.md, fix C, C4).
+	firstClaimPower int
 }
 
 // NewScheme returns a scheme for polynomials with < degreeBound coefficients;
@@ -66,6 +72,8 @@ func NewScheme(degreeBound uint64, h hash.Hash) (*Scheme, error) {
 		degreeBound: degreeBound,
 		nbSteps:     bits.TrailingZeros64(degreeBound),
 		domain:      fft.NewDomain(rho * degreeBound),
+
+		firstClaimPower: 1,
 	}
 	n := int(s.domain.Cardinality)
 	natural := make([]fr.Element, n)
@@ -131,6 +139,16 @@ func (s *Scheme) commit(polys [][]fr.Element) (*Committed, error) {
 		fft.BitReverse(e)
 		c.evals[j] = sort(e)
 	}
+	return s.commitEvals(c.evals), nil
+}
+
+// commitEvals commits to words given by their values at s.points (sorted
+// order) -- not necessarily evaluations of low-degree polynomials; tests use
+// it to play a cheating prover.
+func (s *Scheme) commitEvals(evals [][]fr.Element) *Committed {
+	n := len(s.points)
+	c := &Committed{evals: evals}
+	polys := evals
 	leaves := make([][]byte, n)
 	for i := range leaves {
 		leaves[i] = make([]byte, 0, len(polys)*fr.Bytes)
@@ -141,7 +159,7 @@ func (s *Scheme) commit(polys [][]fr.Element) (*Committed, error) {
 	c.tree = newMerkleTree(s.h, leaves)
 	c.Root = c.tree.root()
 	c.NbPolys = len(polys)
-	return c, nil
+	return c
 }
 
 // PolyRef designates polynomial Poly of commitment Commitment.
@@ -163,12 +181,14 @@ type PairOpening struct {
 
 // BatchQuery holds the answers to one query chain.
 type BatchQuery struct {
+	Mask        PairOpening   // layer 0: opening of the mask R
 	Commitments []PairOpening // layer 0: one opening per commitment
 	Layers      []PairOpening // committed FRI layers 1..nbSteps-1
 }
 
 // BatchProof proves a batch of claims.
 type BatchProof struct {
+	Mask       []byte   // Merkle root of the mask polynomial R (zero-knowledge)
 	Roots      [][]byte // Merkle roots of the FRI layers 1..nbSteps-1 (layer 0 is virtual)
 	Evaluation fr.Element
 	Queries    []BatchQuery
@@ -190,13 +210,17 @@ func (s *Scheme) transcript() (*fiatshamir.Transcript, []string) {
 // the caller's seed, every commitment and every claim -- before deriving λ, so
 // none of it can be chosen after seeing a challenge (strong Fiat-Shamir,
 // resources/2023-691 Def. 3).
-func (s *Scheme) bindStatement(fs *fiatshamir.Transcript, name string, seed []byte, commitments []Commitment, claims []Claim) (fr.Element, error) {
+func (s *Scheme) bindStatement(fs *fiatshamir.Transcript, name string, seed, mask []byte, commitments []Commitment, claims []Claim) (fr.Element, error) {
 	var lambda fr.Element
 	if len(commitments) == 0 || len(claims) == 0 {
 		return lambda, ErrClaim
 	}
 	var buf [8]byte
 	if err := fs.Bind(name, seed); err != nil {
+		return lambda, err
+	}
+	// the mask is committed before λ: it cannot be chosen to cancel a claim
+	if err := fs.Bind(name, mask); err != nil {
 		return lambda, err
 	}
 	for _, c := range commitments {
@@ -251,23 +275,50 @@ func challenge(fs *fiatshamir.Transcript, name string) (fr.Element, error) {
 
 // Open proves the claims about the committed polynomials. seed must bind
 // everything the caller's protocol did before (e.g. its last challenge).
+//
+// For zero-knowledge, every opening includes a fresh random mask polynomial R
+// with DegreeBound − 1 coefficients, committed before λ and added to the
+// batch: then every FRI layer value is uniformly random, whatever the
+// committed polynomials are (resources/2024-1037 Protocol 2, Lemma 2).
 func (s *Scheme) Open(seed []byte, committed []*Committed, claims []Claim) (*BatchProof, error) {
+	r := make([]fr.Element, s.degreeBound-1)
+	for i := range r {
+		if _, err := r[i].SetRandom(); err != nil {
+			return nil, err
+		}
+	}
+	mask, err := s.commit([][]fr.Element{r})
+	if err != nil {
+		return nil, err
+	}
+	return s.open(seed, committed, claims, mask)
+}
+
+// open is Open with a given mask word (tests use it to play a cheater who
+// crafts the mask).
+func (s *Scheme) open(seed []byte, committed []*Committed, claims []Claim, mask *Committed) (*BatchProof, error) {
 	commitments := make([]Commitment, len(committed))
 	for i, c := range committed {
 		commitments[i] = c.Commitment
 	}
+	if mask == nil || mask.NbPolys != 1 {
+		return nil, ErrClaim
+	}
+	proof := &BatchProof{Mask: mask.Root, Roots: make([][]byte, 0, s.nbSteps-1)}
 	fs, names := s.transcript()
-	lambda, err := s.bindStatement(fs, names[0], seed, commitments, claims)
+	lambda, err := s.bindStatement(fs, names[0], seed, proof.Mask, commitments, claims)
 	if err != nil {
 		return nil, err
 	}
 
-	// layer 0 (virtual): q = Σₜ λᵗ (fₜ − vₜ)/(X − zₜ) on a·D, in sorted order.
+	// layer 0 (virtual): q = R + Σₜ λ^(firstClaimPower+t)·(fₜ − vₜ)/(X − zₜ) on
+	// a·D, in sorted order.
 	n := len(s.points)
 	q := make([]fr.Element, n)
+	copy(q, mask.evals[0])
 	den := make([]fr.Element, n)
-	var coef, t fr.Element
-	coef.SetOne()
+	var t fr.Element
+	coef := s.claimCoefficient(lambda)
 	for _, cl := range claims {
 		for i := range den {
 			den[i].Sub(&s.points[i], &cl.Point)
@@ -284,7 +335,6 @@ func (s *Scheme) Open(seed []byte, committed []*Committed, claims []Claim) (*Bat
 	}
 
 	// COMMIT phase: fold layer 0, commit to layers 1..nbSteps-1.
-	proof := &BatchProof{Roots: make([][]byte, 0, s.nbSteps-1)}
 	trees := make([]merkleTree, s.nbSteps)
 	sorted := q
 	var gInv fr.Element
@@ -323,6 +373,7 @@ func (s *Scheme) Open(seed []byte, committed []*Committed, claims []Claim) (*Bat
 	for k, pos := range positions {
 		si := queryChain(pos, n, s.nbSteps)
 		bq := &proof.Queries[k]
+		bq.Mask = mask.tree.pairProof(si[0] / 2)
 		bq.Commitments = make([]PairOpening, len(committed))
 		for c := range committed {
 			bq.Commitments[c] = committed[c].tree.pairProof(si[0] / 2)
@@ -337,27 +388,7 @@ func (s *Scheme) Open(seed []byte, committed []*Committed, claims []Claim) (*Bat
 
 // Verify checks a proof of the claims against the commitments.
 func (s *Scheme) Verify(seed []byte, commitments []Commitment, claims []Claim, proof *BatchProof) error {
-	if proof == nil || len(proof.Roots) != s.nbSteps-1 || len(proof.Queries) != nbQueries {
-		return ErrMalformedProof
-	}
-	fs, names := s.transcript()
-	lambda, err := s.bindStatement(fs, names[0], seed, commitments, claims)
-	if err != nil {
-		return err
-	}
-	xi := make([]fr.Element, s.nbSteps)
-	for i := 0; i < s.nbSteps; i++ {
-		if i > 0 {
-			if err := fs.Bind(names[1+i], proof.Roots[i-1]); err != nil {
-				return err
-			}
-		}
-		if xi[i], err = challenge(fs, names[1+i]); err != nil {
-			return err
-		}
-	}
-	n := len(s.points)
-	positions, err := queryPositions(s.h, fs, names[len(names)-1], proof.Evaluation, uint64(n))
+	lambda, xi, positions, err := s.replay(seed, commitments, claims, proof)
 	if err != nil {
 		return err
 	}
@@ -367,6 +398,49 @@ func (s *Scheme) Verify(seed []byte, commitments []Commitment, claims []Claim, p
 		}
 	}
 	return nil
+}
+
+// replay re-derives the verifier's challenges from the transcript: λ, the
+// folding challenges, and the initial (sorted) query positions.
+func (s *Scheme) replay(seed []byte, commitments []Commitment, claims []Claim, proof *BatchProof) (lambda fr.Element, xi []fr.Element, positions []int, err error) {
+	if proof == nil || len(proof.Mask) == 0 || len(proof.Roots) != s.nbSteps-1 || len(proof.Queries) != nbQueries {
+		err = ErrMalformedProof
+		return
+	}
+	fs, names := s.transcript()
+	if lambda, err = s.bindStatement(fs, names[0], seed, proof.Mask, commitments, claims); err != nil {
+		return
+	}
+	xi = make([]fr.Element, s.nbSteps)
+	for i := 0; i < s.nbSteps; i++ {
+		if i > 0 {
+			if err = fs.Bind(names[1+i], proof.Roots[i-1]); err != nil {
+				return
+			}
+		}
+		if xi[i], err = challenge(fs, names[1+i]); err != nil {
+			return
+		}
+	}
+	positions, err = queryPositions(s.h, fs, names[len(names)-1], proof.Evaluation, uint64(len(s.points)))
+	return
+}
+
+// QueriedPoints returns the points of the evaluation domain at which a proof
+// reveals the committed polynomials: for each query, the pair {x, −x} of
+// layer 0. It is an analysis helper (zero-knowledge tests count how many
+// values of each polynomial a verifier sees); it does not verify the proof.
+func (s *Scheme) QueriedPoints(seed []byte, commitments []Commitment, claims []Claim, proof *BatchProof) ([]fr.Element, error) {
+	_, _, positions, err := s.replay(seed, commitments, claims, proof)
+	if err != nil {
+		return nil, err
+	}
+	res := make([]fr.Element, 0, 2*len(positions))
+	for _, pos := range positions {
+		p := pos / 2
+		res = append(res, s.points[2*p], s.points[2*p+1])
+	}
+	return res, nil
 }
 
 func (s *Scheme) verifyBatchQuery(commitments []Commitment, claims []Claim, lambda fr.Element, xi []fr.Element, proof *BatchProof, bq *BatchQuery, pos int) error {
@@ -392,11 +466,22 @@ func (s *Scheme) verifyBatchQuery(commitments []Commitment, claims []Claim, lamb
 			rows[c][side] = v
 		}
 	}
+	// q starts with the mask R
 	var cur [2]fr.Element
+	if !verifyPair(s.h, proof.Mask, bq.Mask, p, n) {
+		return ErrMerklePath
+	}
+	for side := 0; side < 2; side++ {
+		v, err := parseRow(bq.Mask.Rows[side], 1)
+		if err != nil {
+			return err
+		}
+		cur[side] = v[0]
+	}
 	for side := 0; side < 2; side++ {
 		x := s.points[2*p+side]
-		var coef, t, d fr.Element
-		coef.SetOne()
+		var t, d fr.Element
+		coef := s.claimCoefficient(lambda)
 		for _, cl := range claims {
 			d.Sub(&x, &cl.Point).Inverse(&d)
 			for k, ref := range cl.Polys {
@@ -442,6 +527,17 @@ func (s *Scheme) foldChain(bq *BatchQuery, proof *BatchProof, cur [2]fr.Element,
 		}
 	}
 	return nil
+}
+
+// claimCoefficient returns λ^firstClaimPower, the batching coefficient of the
+// first claim.
+func (s *Scheme) claimCoefficient(lambda fr.Element) fr.Element {
+	var c fr.Element
+	c.SetOne()
+	for i := 0; i < s.firstClaimPower; i++ {
+		c.Mul(&c, &lambda)
+	}
+	return c
 }
 
 // foldStep folds the pair (l, r) = (P(g^p), P(−g^p)) with challenge x:

@@ -1,6 +1,7 @@
 package nativefri
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"errors"
 	"math/big"
@@ -227,6 +228,7 @@ func TestBatchRejectsTampering(t *testing.T) {
 		p.Roots = append([][]byte{}, honest.Roots...)
 		p.Queries = make([]BatchQuery, len(honest.Queries))
 		for i, q := range honest.Queries {
+			p.Queries[i].Mask = q.Mask
 			p.Queries[i].Commitments = append([]PairOpening{}, q.Commitments...)
 			p.Queries[i].Layers = append([]PairOpening{}, q.Layers...)
 		}
@@ -250,6 +252,9 @@ func TestBatchRejectsTampering(t *testing.T) {
 			p.Queries[7].Layers[0].Rows[0] = flip(p.Queries[7].Layers[0].Rows[0])
 		}},
 		{"layer root", func(p *BatchProof, _ *batchFixture) { p.Roots[1] = flip(p.Roots[1]) }},
+		{"mask root", func(p *BatchProof, _ *batchFixture) { p.Mask = flip(p.Mask) }},
+		{"mask row", func(p *BatchProof, _ *batchFixture) { p.Queries[5].Mask.Rows[0] = flip(p.Queries[5].Mask.Rows[0]) }},
+		{"missing mask", func(p *BatchProof, _ *batchFixture) { p.Mask = nil }},
 		{"final evaluation", func(p *BatchProof, _ *batchFixture) { p.Evaluation.Add(&p.Evaluation, &one) }},
 		{"missing query", func(p *BatchProof, _ *batchFixture) { p.Queries = p.Queries[1:] }},
 		{"missing commitment opening", func(p *BatchProof, _ *batchFixture) {
@@ -298,5 +303,80 @@ func TestPairProofMatchesTree(t *testing.T) {
 		if verifyPair(h, tree.root(), tree.pairProof(p), (p+1)%8, 16) {
 			t.Fatalf("pair %d: opening accepted at the wrong index", p)
 		}
+	}
+}
+
+// TestMaskRandomizesOpening: with the mask R (fix C), opening the same
+// statement twice must give unrelated FRI transcripts -- fresh randomness
+// reaches every folded layer and the final value. Without R the opening is a
+// deterministic function of the committed words, so its folded layers carry
+// information about them (resources/2024-1037 §2).
+func TestMaskRandomizesOpening(t *testing.T) {
+	f := newBatchFixture(t, 32)
+	a, b := f.prove(t), f.prove(t)
+	if len(a.Mask) == 0 || len(b.Mask) == 0 {
+		t.Fatal("proof has no mask commitment")
+	}
+	if bytes.Equal(a.Mask, b.Mask) {
+		t.Fatal("same mask in two openings")
+	}
+	for i := range a.Roots {
+		if bytes.Equal(a.Roots[i], b.Roots[i]) {
+			t.Fatalf("FRI layer %d identical in two openings of the same statement", i+1)
+		}
+	}
+	if a.Evaluation.Equal(&b.Evaluation) {
+		t.Fatal("final FRI value identical in two openings of the same statement")
+	}
+	for _, p := range []*BatchProof{a, b} {
+		if err := f.s.Verify(f.seed, f.commitments, f.claims, p); err != nil {
+			t.Fatalf("masked proof rejected: %v", err)
+		}
+	}
+}
+
+// TestMaskCannotCancelFalseClaim demonstrates design decision C4. FRI only sees
+// the sum q = R + Σ coefₜ·Qₜ, and R is an arbitrary committed word (nobody
+// checks it alone). A cheater with a false claim v' ≠ f(z) has a quotient
+// Q₀ = Q₀_true + E with E(x) = (f(z) − v')/(x − z), not a polynomial. If R had
+// the same coefficient as Q₀, committing "R" = P − E (P any polynomial) would
+// cancel E and FRI would accept. Giving the claims λ¹, λ², … (R keeps λ⁰ = 1)
+// leaves (λ − 1)·E in q, which FRI rejects.
+func TestMaskCannotCancelFalseClaim(t *testing.T) {
+	const runs = 50
+	accepted := map[int]int{}
+	for _, power := range []int{0, 1} {
+		for i := 0; i < runs; i++ {
+			f := newBatchFixture(t, 32)
+			f.s.firstClaimPower = power
+			var one fr.Element
+			one.SetOne()
+			// false claim: v' = f(z) + 1, so E(x) = −1/(x − z)
+			f.claims[0].Values[0].Add(&f.claims[0].Values[0], &one)
+			z := f.claims[0].Point
+			p := randPoly(t, 16)
+			mask := make([]fr.Element, len(f.s.points))
+			for k, x := range f.s.points {
+				var d fr.Element
+				d.Sub(&x, &z).Inverse(&d) // −E(x) = 1/(x − z)
+				mask[k] = evalPoly(p, x)
+				mask[k].Add(&mask[k], &d)
+			}
+			proof, err := f.s.open(f.seed, f.committed, f.claims, f.s.commitEvals([][]fr.Element{mask}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if f.s.Verify(f.seed, f.commitments, f.claims, proof) == nil {
+				accepted[power]++
+			}
+		}
+	}
+	t.Logf("false claim cancelled by a crafted mask: accepted %d/%d if R shares λ⁰ with the first claim (unsafe), %d/%d with claims at λ¹… (our design)",
+		accepted[0], runs, accepted[1], runs)
+	if accepted[0] == 0 {
+		t.Fatal("test bug: the attack should succeed when the coefficient is shared")
+	}
+	if accepted[1] != 0 {
+		t.Fatalf("crafted mask accepted %d/%d times with claims at λ¹…", accepted[1], runs)
 	}
 }

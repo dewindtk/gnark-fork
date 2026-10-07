@@ -69,9 +69,9 @@ func Verify(proof *Proof, vk *VerifyingKey, publicWitness fr.Vector, opts ...bac
 	var tmp, one fr.Element
 	one.SetOne()
 
-	// 3 - the RHS: (h1 + ζ^{n+2}·h2 + ζ^{2(n+2)}·h3)·(ζⁿ-1)
+	// 3 - the RHS: (h1 + ζᵏ·h2 + ζ²ᵏ·h3)·(ζⁿ-1), k = pieceSize
 	var rhs fr.Element
-	tmp.Exp(zeta, big.NewInt(int64(vk.Size+2)))
+	tmp.Exp(zeta, new(big.Int).SetUint64(vk.pieceSize()))
 	rhs.Mul(&e.H3, &tmp).
 		Add(&rhs, &e.H2).
 		Mul(&rhs, &tmp).
