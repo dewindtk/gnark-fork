@@ -27,6 +27,7 @@ Reference papers, all in `resources/` (committed):
 - **Curve scope**: bn254 only, hand-written (no bavard codegen). Other curves are additive later.
 - **Milestone scope**: native (out-of-circuit) backend only. No in-circuit verifier / recursion in v1.
 - **Hash**: sha256 (matches the vendored `internal/nativefri` and old `backend/plonkfri` as-is). Poseidon2 swap deferred to when an in-circuit verifier is built.
+- **FRI security**: rate ρ=1/8 (`rho = 8`), **86 queries = 128-bit proven** soundness (Johnson bound). See "Security status".
 
 ## Plan
 
@@ -152,11 +153,33 @@ Replay Fiat-Shamir from the proof's published roots + public inputs to get `beta
 - **Not yet checked**: how much `constraint/bn254.SparseR1CS`'s `Solve()`/`SparseR1CSSolution` API has drifted since this code was written (2024) — still a Phase 1 task.
 - **Not yet read**: `computeQuotientCanonical`'s coset-FFT trick in detail, and the permutation-index bookkeeping (`pk.Permutation[i]`) in `computeBlindedZCanonical` — flagged as unread, not blocking Phase 0/1 start.
 
+## Security status (current state — read before using or extending plonkfri)
+
+**Not yet sound.** Proofs verify correctly, but a dishonest prover can still forge one in ~16 attempts (concern 2). Do not treat any output as secure until fixes B and C land. Details, measurements and reasoning are in the 2026-10-07 session-log entries below.
+
+A FRI-PLONK proof rests on two promises: (1) every committed table is a low-degree polynomial — FRI's job; (2) those polynomials satisfy the circuit identity, checked at one random point `zeta` — PLONK's job. Soundness is the *weakest* of the checks, so every one must reach the target.
+
+| # | Concern | Protocol part | Effect | Status |
+|---|---|---|---|---|
+| 1 | FRI checked **1 query** per proof (`nbRounds = 1`) | FRI (`internal/nativefri`) — all 18 commitments | Garbage accepted ~1/8 → ~3 bits; e.g. a pointwise `H = F/Z_H` table passes PLONK at every `zeta`, only FRI could catch it | ✅ Fixed (A): fold once, **86 queries** = 128-bit proven (Johnson bound, ρ=1/8, `s = 2λ/log₂(1/ρ)`) |
+| 4 | `VerifyOpening` never tied `ClaimedValue` to the Merkle-authenticated leaf | FRI opening ↔ PLONK final check | Cheater claims any value at `zeta` (solve for `h`) → forgery with probability 1 | ✅ Fixed (A): `ErrClaimedValue` |
+| 2 | `zeta` drawn from the 16n-point FRI domain, not the whole field | PLONK final check (`prove.go`/`verify.go`) | Schwartz–Zippel escape up to ~19%; 1/16 of positions put `zeta` in the circuit domain (`Z_H(zeta)=0`) → honest low-degree polys for a witness breaking one gate pass ~1/16 | ❌ Open — fix **B**: sample `zeta ∈ F`, open via DEEP/RedShift quotient `(f(X)−f(z))/(X−z)` proven low-degree. Not fixable by any parameter. |
+| 3 | Blinding (2 coeffs L/R/O, 3 for Z) vs values revealed by queries + openings | PLONK prover blinding (`prove.go`) | Zero-knowledge (privacy) only, not soundness; with 86 queries it clearly leaks | ❌ Open — fix **C**: blinding degree ≥ number of revealed evaluations; depends on final query/opening design from B |
+
+Parameter choice (decided 2026-10-07): **proven** 128-bit, not conjectured. Rationale: once FRI folds once, query count costs only proof size/verify time, not prover time (RedShift §6–7), and the proven regime keeps knowledge-soundness extractable. Conjectured alternative (43 queries, ~half the size) remains an opt-in for later. Sources: `resources/2020-654.pdf` §3.2/§8 (2λ/log(1/ρ) proven for q ≫ n²; λ/log(1/ρ) conjectured), `resources/2019-1400.pdf` Table 1, `resources/Revision2OfTR17-134.pdf` Thm 3.3 / Conj. 1.5.
+
+Lessons that generalize: (a) passing honest-proof tests says nothing about soundness — every check needs a test that a *cheating* prover is rejected; (b) any value the verifier uses must be bound to something it verified (here: `ClaimedValue` ↔ leaf, `ID` ↔ `Roots[0]`, layer sizes computed not trusted); (c) measure acceptance rates empirically — the 1/8 measurement exposed concern 1 before the theory did.
+
 ## Open questions / next steps
 
 - [x] Phase 0: restore `backend/plonkfri/bn254` from `1ed22f78^`, repoint import to `internal/nativefri`.
 - [x] Phase 1: API drift check — none needed; plain-gate circuits work.
 - [x] Phase 2: shared circuit suite passes (30/30 in scope) after the 2026-10-07 fixes.
+- [x] Security fix A: multi-query FRI (86 queries, proven 128-bit) + opening/ID binding fixes.
+- [ ] **Security fix B (next, blocks everything else)**: out-of-domain `zeta` via DEEP/RedShift quotient — see "Security status".
+- [ ] Security fix C: blinding degree vs revealed evaluations (after B).
+- [ ] Phase 3 prerequisite: the in-circuit FRI gadget `std/commitments/fri` (from PR #2, `restore-fri-gadget`) still has `const nbRounds = 1` — the same 1-query weakness fix A removed natively. It is unused today; port the fix-A structure (one commit phase, 86 queries, root/ID binding) before using it for recursion.
+- [ ] Cheap wins: verify the 11 fixed VK proximity proofs once at setup instead of on every Verify (~60% of verify time); Merkle path de-duplication across queries (proof size).
 - [ ] Decide post-v1 direction: batched openings (prover is ~10–14× slower than KZG), more curves, or in-circuit verifier.
 - [ ] Read `computeQuotientCanonical`'s coset-FFT trick and the `pk.Permutation[i]` bookkeeping in `computeBlindedZCanonical` in full (not yet done).
 
@@ -188,3 +211,36 @@ Replay Fiat-Shamir from the proof's published roots + public inputs to get `beta
   3. `Verify` checks `len(publicWitness) == vk.NbPublicVariables` → `"witness length is invalid"` (same message as KZG backend).
 - Result: suite now **30/30 in-scope circuits pass, 2 skipped as out-of-scope** (`commit`, `gkr_cube`). New regression test `TestTinyCircuitCompleteness` (200 proofs on a 1-constraint circuit); ad-hoc stress run of 1000 proofs each on 1–2 constraint circuits with/without public inputs: 0 rejections. `go build ./...` clean.
 - Next: commit fixes + `suite_test.go`; v1 is functionally complete. Then pick post-v1 direction (batched openings for prover speed vs. more curves vs. in-circuit verifier).
+
+### 2026-10-07 (cont.) — security-parameter audit
+Measured, not just reasoned (probe tests in `internal/nativefri`, removed afterwards; code unchanged):
+- **FRI: 1 query per proof → ~3 bits of security.** `nativefri` has `rho = 8`, `nbRounds = 1`; each "round" derives exactly one query position. Measured acceptance (n=16, 4000 trials): honest 100%; one coefficient over-degree 12.5%; 2× degree 12.9%; *completely random codeword* 13.2% (≈ 1/rho: the final folded layer has rho=8 points). Under Fiat-Shamir a cheater grinds (re-randomizes blinding) → forging costs ~8 hash attempts. Target is ~100–128 bits.
+- **PLONK layer: `zeta` drawn from a set of only 16n points** (`zeta = GenOpening^position`, `position < 2·rho·n`), not the whole field. Schwartz–Zippel escape probability up to ~3n/16n ≈ 19%. Worse: 1/16 of positions give `zeta^n = 1` (zeta inside the circuit domain) → `Z_H(zeta)=0`, RHS=0, H unchecked, the check degenerates to a single gate row. This is structural — the cost of the old code's "sidestep" of opening at arbitrary points — fixable only by DEEP/RedShift-LPC style out-of-domain opening (quotient `(f(X)−f(z))/(X−z)` proven low-degree).
+- **Naive fix cost** (set `nbRounds=43`, n=4096): build one FRI proof 24ms → 969ms (41×), ~4.8KB → ~206KB, random codeword accepted 0/2000. Cost is because each round re-runs all folding + Merkle trees for a single query; standard FRI folds once and answers all queries from the same trees.
+- **Query counts needed for rate 1/8** (bits/query = −log2(1−δ)): provable unique-decoding δ<0.4375 → 0.83 bits/query (~154 queries for 128 bits); Johnson bound δ<1−√ρ≈0.646 → 1.5 bits/query (~86); conjectured δ→1−ρ → 3 bits/query (~43 for 128, ~34 for 100), the measured 1/8 matches the conjectured regime. Grinding/proof-of-work can add ~16–20 bits cheaply.
+- **ZK interaction (not soundness)**: every FRI query + opening reveals evaluations of the blinded polys; L/R/O are blinded with only 2 random coeffs, Z with 3. More queries ⇒ blinding degree must grow with the number of revealed evaluations or zero-knowledge breaks.
+- Proposed plan: (A) restructure `nativefri` to one commit phase + s queries, s derived from a target security level; (B) DEEP-style out-of-domain `zeta` from the full field; (C) scale blinding with revealed evaluations. Open decision: provable (Johnson) vs conjectured security parameterization.
+
+### 2026-10-07 (cont.) — query count from the literature (`resources/`)
+Per-query soundness error for rate ρ, and resulting queries s for λ bits (s = λ / −log2(per-query error)):
+- Original FRI (`Revision2OfTR17-134`, Thm 3.3): proven only for δ ≤ (1−3ρ)/4 → per-query reject ≥ 5/32 at ρ=1/8 (~0.25 bits/query; impractical). Conj. 1.5: δ up to 1−ρ. Paper's own example: ρ=1/8, ε=2⁻⁸⁰.
+- DEEP-FRI (`2019-336`): proven per-query error max(1−δ, √ρ) up to the Johnson bound, needs larger fields.
+- Proximity Gaps (`2020-654`, §3.2/§8): history t≈4λ/log(1/ρ) [BKS18] → 3λ/log(1/ρ) [BGKS20] → **2λ/log(1/ρ) proven for q ≫ n²** (Johnson bound, error √ρ). **λ/log(1/ρ) conjectured** (BBHR18b lower bound; Conj. 8.4). "λ often fixed to 128."
+- RedShift (`2019-1400`, Table 1, 80-bit target): ρ=1/16 → 88 (unique decoding) / 40 (Johnson, q>|D|²) / 20 (conjectured). Their implementation targets 80 bits, ρ=1/16. Notes: query count does **not** affect prover time, only proof size/verify; beyond Johnson, knowledge-soundness is non-extractable.
+- **Our setting**: bn254 fr (q≈2²⁵⁴ ≫ n²), so the proven Johnson regime applies. ρ=1/8 (log 1/ρ = 3):
+
+| λ | conjectured (λ/3) | proven Johnson (2λ/3) | unique decoding (λ/0.83) |
+|---|---|---|---|
+| 80 | 27 | 54 | 97 |
+| 100 | 34 | 67 | 121 |
+| 128 | 43 | 86 | 154 |
+
+Measured per-query acceptance of garbage = 1/8 = ρ, i.e. the conjectured regime is what we observe in practice; the proven bound is a 2× safety margin.
+
+### 2026-10-07 (cont.) — fix A landed
+- `internal/nativefri` restructured: COMMIT phase once (each layer's Merkle tree built once, all nodes kept via new `merkleTree`, path-compatible with gnark-crypto's `merkletree.VerifyProof`), then **`nbQueries = 86`** query chains (proven Johnson-bound, 128 bits at ρ=1/8). Query positions: one Fiat-Shamir seed after all roots + final evaluation are bound, position j = H(seed‖j) mod |D|. Proof format: `Rounds []Round` → `Roots [][]byte` + `Queries []Query` + `Evaluation`.
+- **Found and fixed a 4th, critical hole**: `VerifyOpening` never checked `ClaimedValue` against the Merkle-authenticated leaf (`ProofSet[0]`), and `verify.go` uses `ClaimedValue` — a cheater could claim any evaluation (e.g. solve the final identity for h(zeta)) with a valid path → forgery with probability 1. Now rejected (`ErrClaimedValue`); regression test written first and confirmed failing on the old code.
+- Verifier hardening: checks `ID == Roots[0]` (ID is what PLONK binds into Fiat-Shamir), computes layer sizes itself instead of trusting prover-supplied `numLeaves`, rejects malformed shapes with `ErrMalformedProof` instead of panicking.
+- Tests (`internal/nativefri/fri_test.go`): Merkle-path equivalence with gnark-crypto, completeness, soundness (0/600 far words accepted vs ~1/8 before), tampering cases, opening-lie. Full plonkfri suite still 30/30 + 2 skipped.
+- Perf (bn254 refCircuit, before → after): 4094 constraints setup 550→260ms, prove 534→383ms, verify 0.6→39ms; 65534: setup 8.3→4.1s, prove 9.2→6.8s, verify 1.0→69ms. Proof's 7 proximity proofs ≈ 3.2MB / 4.8MB. Verify cost is 18 proximity proofs × 86 chains; the 11 VK proofs are fixed and could be checked once at setup (cheap later win). Size is the next driver for batching + Merkle path dedup.
+- Still open: fix B (out-of-domain zeta — currently caps soundness at ~4 bits), fix C (blinding vs 86×revealed evaluations — ZK now clearly insufficient).

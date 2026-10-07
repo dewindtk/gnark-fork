@@ -63,12 +63,12 @@ func TestSetupSmoke(t *testing.T) {
 	// every setup polynomial must have actually gone through FRI's
 	// BuildProofOfProximity -- a real proof has at least one folding round.
 	for i, pp := range vk.Qpp {
-		assert.NotEmpty(pp.Rounds, "Qpp[%d] has no rounds -- selector polynomial was not committed", i)
+		assert.NotEmpty(pp.Queries, "Qpp[%d] has no queries -- selector polynomial was not committed", i)
 	}
 	for i, pp := range vk.Spp {
-		assert.NotEmpty(pp.Rounds, "Spp[%d] has no rounds -- permutation polynomial was not committed", i)
+		assert.NotEmpty(pp.Queries, "Spp[%d] has no queries -- permutation polynomial was not committed", i)
 	}
 	for i, pp := range vk.Idpp {
-		assert.NotEmpty(pp.Rounds, "Idpp[%d] has no rounds -- identity polynomial was not committed", i)
+		assert.NotEmpty(pp.Queries, "Idpp[%d] has no queries -- identity polynomial was not committed", i)
 	}
 }
