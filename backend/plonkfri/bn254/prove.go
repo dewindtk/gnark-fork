@@ -60,6 +60,22 @@ type Evaluations struct {
 	L, R, O, Z, H1, H2, H3         fr.Element // prover's
 }
 
+// Blinding sizes: the number of random coefficients added to each secret
+// polynomial (see PROJECT.md, "Fix C design"). l, r, o and z are blinded as
+// w + Z_H·r with r of nbBlindLRO / nbBlindZ coefficients; the quotient pieces
+// get nbBlindQuotient random coefficients (0: not randomized yet).
+const (
+	nbBlindLRO      = 2
+	nbBlindZ        = 3
+	nbBlindQuotient = 0
+)
+
+// pieceSize is the number of coefficients of each quotient piece h1, h2, h3,
+// h = h1 + X^k·h2 + X^{2k}·h3.
+func (vk *VerifyingKey) pieceSize() uint64 {
+	return vk.Size + 2
+}
+
 // ErrZetaInDomain is returned when zeta falls in the circuit domain H or the
 // FRI evaluation domain (probability ~2^-230 for an honest prover).
 var ErrZetaInDomain = errors.New("plonkfri: zeta lies in the circuit or evaluation domain")
@@ -544,10 +560,11 @@ func computeQuotientCanonical(pk *ProvingKey, evaluationConstraintsIndBitReverse
 	// using fft.DIT put h revert bit reverse
 	pk.Domain[1].FFTInverse(h, fft.DIT, fft.OnCoset())
 
-	// degree of hi is n+2 because of the blinding
-	h1 := h[:pk.Domain[0].Cardinality+2]
-	h2 := h[pk.Domain[0].Cardinality+2 : 2*(pk.Domain[0].Cardinality+2)]
-	h3 := h[2*(pk.Domain[0].Cardinality+2) : 3*(pk.Domain[0].Cardinality+2)]
+	// split h into pieces of pieceSize coefficients
+	k := pk.Vk.pieceSize()
+	h1 := h[:k]
+	h2 := h[k : 2*k]
+	h3 := h[2*k : 3*k]
 
 	return h1, h2, h3
 
@@ -581,7 +598,7 @@ func padToDomain(v fr.Vector, domain *fft.Domain, fill fr.Element) []fr.Element 
 func computeBlindedZCanonical(l, r, o []fr.Element, pk *ProvingKey, beta, gamma fr.Element) ([]fr.Element, error) {
 
 	// note that z has more capacity has its memory is reused for blinded z later on
-	z := make([]fr.Element, pk.Domain[0].Cardinality, pk.Domain[0].Cardinality+3)
+	z := make([]fr.Element, pk.Domain[0].Cardinality, pk.Domain[0].Cardinality+nbBlindZ)
 	nbElmts := int(pk.Domain[0].Cardinality)
 	gInv := make([]fr.Element, pk.Domain[0].Cardinality)
 
@@ -623,7 +640,7 @@ func computeBlindedZCanonical(l, r, o []fr.Element, pk *ProvingKey, beta, gamma 
 	pk.Domain[0].FFTInverse(z, fft.DIF)
 	fft.BitReverse(z)
 
-	return blindPoly(z, pk.Domain[0].Cardinality, 2)
+	return blindPoly(z, pk.Domain[0].Cardinality, nbBlindZ-1)
 
 }
 
@@ -633,9 +650,9 @@ func computeBlindedLROCanonical(
 	ll, lr, lo []fr.Element, domain *fft.Domain) (bcl, bcr, bco []fr.Element, err error) {
 
 	// note that bcl, bcr and bco reuses cl, cr and co memory
-	cl := make([]fr.Element, domain.Cardinality, domain.Cardinality+2)
-	cr := make([]fr.Element, domain.Cardinality, domain.Cardinality+2)
-	co := make([]fr.Element, domain.Cardinality, domain.Cardinality+2)
+	cl := make([]fr.Element, domain.Cardinality, domain.Cardinality+nbBlindLRO)
+	cr := make([]fr.Element, domain.Cardinality, domain.Cardinality+nbBlindLRO)
+	co := make([]fr.Element, domain.Cardinality, domain.Cardinality+nbBlindLRO)
 
 	chDone := make(chan error, 2)
 
@@ -644,7 +661,7 @@ func computeBlindedLROCanonical(
 		copy(cl, ll)
 		domain.FFTInverse(cl, fft.DIF)
 		fft.BitReverse(cl)
-		bcl, err = blindPoly(cl, domain.Cardinality, 1)
+		bcl, err = blindPoly(cl, domain.Cardinality, nbBlindLRO-1)
 		chDone <- err
 	}()
 	go func() {
@@ -652,13 +669,13 @@ func computeBlindedLROCanonical(
 		copy(cr, lr)
 		domain.FFTInverse(cr, fft.DIF)
 		fft.BitReverse(cr)
-		bcr, err = blindPoly(cr, domain.Cardinality, 1)
+		bcr, err = blindPoly(cr, domain.Cardinality, nbBlindLRO-1)
 		chDone <- err
 	}()
 	copy(co, lo)
 	domain.FFTInverse(co, fft.DIF)
 	fft.BitReverse(co)
-	if bco, err = blindPoly(co, domain.Cardinality, 1); err != nil {
+	if bco, err = blindPoly(co, domain.Cardinality, nbBlindLRO-1); err != nil {
 		return
 	}
 	err = <-chDone

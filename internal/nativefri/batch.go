@@ -337,27 +337,7 @@ func (s *Scheme) Open(seed []byte, committed []*Committed, claims []Claim) (*Bat
 
 // Verify checks a proof of the claims against the commitments.
 func (s *Scheme) Verify(seed []byte, commitments []Commitment, claims []Claim, proof *BatchProof) error {
-	if proof == nil || len(proof.Roots) != s.nbSteps-1 || len(proof.Queries) != nbQueries {
-		return ErrMalformedProof
-	}
-	fs, names := s.transcript()
-	lambda, err := s.bindStatement(fs, names[0], seed, commitments, claims)
-	if err != nil {
-		return err
-	}
-	xi := make([]fr.Element, s.nbSteps)
-	for i := 0; i < s.nbSteps; i++ {
-		if i > 0 {
-			if err := fs.Bind(names[1+i], proof.Roots[i-1]); err != nil {
-				return err
-			}
-		}
-		if xi[i], err = challenge(fs, names[1+i]); err != nil {
-			return err
-		}
-	}
-	n := len(s.points)
-	positions, err := queryPositions(s.h, fs, names[len(names)-1], proof.Evaluation, uint64(n))
+	lambda, xi, positions, err := s.replay(seed, commitments, claims, proof)
 	if err != nil {
 		return err
 	}
@@ -367,6 +347,49 @@ func (s *Scheme) Verify(seed []byte, commitments []Commitment, claims []Claim, p
 		}
 	}
 	return nil
+}
+
+// replay re-derives the verifier's challenges from the transcript: λ, the
+// folding challenges, and the initial (sorted) query positions.
+func (s *Scheme) replay(seed []byte, commitments []Commitment, claims []Claim, proof *BatchProof) (lambda fr.Element, xi []fr.Element, positions []int, err error) {
+	if proof == nil || len(proof.Roots) != s.nbSteps-1 || len(proof.Queries) != nbQueries {
+		err = ErrMalformedProof
+		return
+	}
+	fs, names := s.transcript()
+	if lambda, err = s.bindStatement(fs, names[0], seed, commitments, claims); err != nil {
+		return
+	}
+	xi = make([]fr.Element, s.nbSteps)
+	for i := 0; i < s.nbSteps; i++ {
+		if i > 0 {
+			if err = fs.Bind(names[1+i], proof.Roots[i-1]); err != nil {
+				return
+			}
+		}
+		if xi[i], err = challenge(fs, names[1+i]); err != nil {
+			return
+		}
+	}
+	positions, err = queryPositions(s.h, fs, names[len(names)-1], proof.Evaluation, uint64(len(s.points)))
+	return
+}
+
+// QueriedPoints returns the points of the evaluation domain at which a proof
+// reveals the committed polynomials: for each query, the pair {x, −x} of
+// layer 0. It is an analysis helper (zero-knowledge tests count how many
+// values of each polynomial a verifier sees); it does not verify the proof.
+func (s *Scheme) QueriedPoints(seed []byte, commitments []Commitment, claims []Claim, proof *BatchProof) ([]fr.Element, error) {
+	_, _, positions, err := s.replay(seed, commitments, claims, proof)
+	if err != nil {
+		return nil, err
+	}
+	res := make([]fr.Element, 0, 2*len(positions))
+	for _, pos := range positions {
+		p := pos / 2
+		res = append(res, s.points[2*p], s.points[2*p+1])
+	}
+	return res, nil
 }
 
 func (s *Scheme) verifyBatchQuery(commitments []Commitment, claims []Claim, lambda fr.Element, xi []fr.Element, proof *BatchProof, bq *BatchQuery, pos int) error {

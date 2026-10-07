@@ -242,7 +242,7 @@ Done: Phase 0–2 (restore, compile, shared circuit suite 30/30); security fix A
 - **B2 done (2026-10-07):** `internal/nativefri/batch.go` (`Scheme`, `Commit`, `Open`, `Verify`) + `batch_test.go`, alongside the old API (removed in B3). 
 - **B3 done:** setup/prove/verify on `Scheme`; old per-polynomial `nativefri` API removed. B4 tests: in-domain-zeta forgery 0/800, lie-at-zeta 0/200, witness-leak 0/516.
 
-**Step 2 — Fix C: zero-knowledge. C1 design drafted 2026-10-07 — see "Fix C design (C1)" below; decisions 1–3 approved (173, mask always on, larger tiny proofs). Next: C2 red test.** Original note: Also add a separate random blinding polynomial to the FRI batch (consideration 2, [HK24]). After B the exact count is known: each committed poly is revealed at ~2·86 FRI positions + its `zeta` openings → blinding degree must be ≥ that; FRI degree bound/domain sizing must absorb it. RedShift samples outside D for perfect ZK — check §6.
+**Step 2 — Fix C: zero-knowledge. C1 design drafted 2026-10-07 — see "Fix C design (C1)" below; decisions 1–3 approved (173, mask always on, larger tiny proofs). C2 red test written 2026-10-07 (`zk_test.go`, fails as intended). Next: C3 (mask R in nativefri).** Original note: Also add a separate random blinding polynomial to the FRI batch (consideration 2, [HK24]). After B the exact count is known: each committed poly is revealed at ~2·86 FRI positions + its `zeta` openings → blinding degree must be ≥ that; FRI degree bound/domain sizing must absorb it. RedShift samples outside D for perfect ZK — check §6.
 
 **Decided — security target (consideration 4):** option (a), classical 128 bits + "plausibly PQ" (see Design decisions). To revisit: explicit PQ target after reading [CMS19] / Chiesa–Yogev / NIST PQC criteria; optional grinding to trade queries for prover work.
 
@@ -485,3 +485,9 @@ Measured per-query acceptance of garbage = 1/8 = ρ, i.e. the conjectured regime
 - **Found while deriving:** the mask R must not share the coefficient λ⁰ with the first claim — otherwise a cheater commits "R" = P − Q₀ for a false quotient Q₀ and FRI, which only sees R + Q₀, accepts. Claims move to λ¹, λ², … (as in HK24 eq. (2)); a test for this attack is planned in C3.
 - Degree check of the derivation against today's code (b = 2/3 → pieces n+2 ✓) before trusting it for b = 174.
 - Testing choice: ZK can't be tested statistically (every 254-bit value looks random); test the structural condition of Lemma 1 (full rank of the blinding map on the revealed points) instead, red first.
+
+### 2026-10-07 (cont.) — C2: zero-knowledge test, red first
+- Behaviour-preserving refactors first (all tests green after them): `nativefri.(*Scheme).QueriedPoints` (shares the transcript replay with `Verify` via `replay`, so it can't drift); blinding sizes as named constants `nbBlindLRO=2`, `nbBlindZ=3`, `nbBlindQuotient=0`; the hard-coded `n+2` piece size now lives only in `vk.pieceSize()` (prover split + verifier RHS).
+- `TestRevealedValuesAreUniform` checks HK24 Lemma 1's exact condition on a real proof: per secret polynomial, the matrix `[B(xᵢ)·xᵢʲ]` over the distinct revealed points (B = Z_H for l/r/o/z, Xᵏ for h1/h2) must have full row rank. Also checks the prover really outputs n + b coefficients (measures the prover, not a constant). `TestRank` sanity-checks the elimination helper on Vandermonde matrices.
+- **Result (red, as intended):** l/r/o revealed at 159 points with rank 2; z 160 points, rank 3; h1/h2 159 points, rank 0.
+- Observation: 159, not 173 — queries are drawn with replacement and this circuit's FRI domain has 512 pairs, so ≈ 86·85/(2·512) ≈ 7 collide → 1 + 2·(86 − 7) ≈ 159 predicted, 159 measured. Large circuits collide less, so the 173/174 bound is still what's needed.
