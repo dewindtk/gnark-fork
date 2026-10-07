@@ -18,8 +18,10 @@ package plonkfri
 
 import (
 	"crypto/sha256"
+	"encoding/binary"
 	"errors"
 
+	"github.com/consensys/gnark-crypto/ecc"
 	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
 	"github.com/consensys/gnark-crypto/ecc/bn254/fr/fft"
 	cs "github.com/consensys/gnark/constraint/bn254"
@@ -67,13 +69,18 @@ type ProvingKey struct {
 
 	// position -> permuted position (position in [0,3*sizeSystem-1])
 	Permutation []int64
+
+	// canonical form of S1, S2, S3
+	CS [3][]fr.Element
+
+	// prover side of the commitment to the preprocessed polynomials
+	// (ql, qr, qm, qo, qk_incomplete, s1, s2, s3), see VerifyingKey.Pre
+	Pre *nativefri.Committed
 }
 
-// VerifyingKey stores the data needed to verify a proof:
-// * The commitment scheme
-// * Commitments of ql prepended with as many ones as there are public inputs
-// * Commitments of qr, qm, qo, qk prepended with as many zeroes as there are public inputs
-// * Commitments to S1, S2, S3
+// VerifyingKey stores the data needed to verify a proof. It is O(1) in the
+// circuit size: the preprocessed polynomials are represented by one Merkle
+// root, and are proven low-degree as part of every proof's batched opening.
 type VerifyingKey struct {
 
 	// Size circuit, that is the closest power of 2 bounding above
@@ -86,25 +93,48 @@ type VerifyingKey struct {
 	// cosetShift generator of the coset on the small domain
 	CosetShift fr.Element
 
-	// S commitments to S1, S2, S3
-	SCanonical [3][]fr.Element
-	Spp        [3]nativefri.ProofOfProximity
+	// DegreeBound is the number of coefficients every committed polynomial
+	// may have (a power of two); it sizes the FRI code, see Setup.
+	DegreeBound uint64
 
-	// Id commitments to Id1, Id2, Id3
-	// Id   [3]Commitment
-	IdCanonical [3][]fr.Element
-	Idpp        [3]nativefri.ProofOfProximity
+	// Pre commits to ql, qr, qm, qo, qk_incomplete, s1, s2, s3 (in this order;
+	// ql..qk prepended with the public-input placeholder rows, qk to be
+	// completed with the public inputs).
+	Pre nativefri.Commitment
 
-	// Commitments to ql, qr, qm, qo prepended with as many zeroes (ones for l) as there are public inputs.
-	// In particular Qk is not complete.
-	Qpp [5]nativefri.ProofOfProximity // Ql, Qr, Qm, Qo, Qk
+	// Fri is the batched DEEP-FRI scheme all polynomials are committed with.
+	Fri *nativefri.Scheme
+}
 
-	// Iopp scheme (currently one for each size of polynomial)
-	Iopp nativefri.Iopp
+// indices of the preprocessed polynomials in VerifyingKey.Pre
+const (
+	preQl = iota
+	preQr
+	preQm
+	preQo
+	preQk
+	preS1
+	preS2
+	preS3
+	nbPre
+)
 
-	// generator of the group on which the Iopp works. If i is the opening position,
-	// the polynomials will be opened at genOpening^{i}.
-	GenOpening fr.Element
+// digest binds every field of the verifying key; it is the first thing bound
+// into the Fiat-Shamir transcript, so a proof is tied to one circuit
+// (strong Fiat-Shamir, resources/2023-691 Def. 3).
+func (vk *VerifyingKey) digest() []byte {
+	h := sha256.New()
+	h.Write([]byte("plonkfri-bn254-vk"))
+	var buf [8]byte
+	for _, v := range []uint64{vk.Size, vk.NbPublicVariables, vk.DegreeBound, uint64(vk.Pre.NbPolys)} {
+		binary.BigEndian.PutUint64(buf[:], v)
+		h.Write(buf[:])
+	}
+	for _, e := range []fr.Element{vk.SizeInv, vk.Generator, vk.CosetShift} {
+		h.Write(e.Marshal())
+	}
+	h.Write(vk.Pre.Root)
+	return h.Sum(nil)
 }
 
 // Setup sets proving and verifying keys
@@ -150,17 +180,14 @@ func Setup(spr *cs.SparseR1CS) (*ProvingKey, *VerifyingKey, error) {
 	vk.Generator.Set(&pk.Domain[0].Generator)
 	vk.NbPublicVariables = uint64(len(spr.Public))
 
-	// IOP schemess
-	// The +2 is to handle the blinding.
-	sizeIopp := pk.Domain[0].Cardinality + 2
-	vk.Iopp = nativefri.RADIX_2_FRI.New(sizeIopp, sha256.New())
-	// only there to access the group used in FRI...
-	rho := uint64(nativefri.GetRho())
-	// we multiply by 2 because the IOP is created with size pk.Domain[0].Cardinality + 2 (because
-	// of the blinding), so the domain will be rho*size_domain where size_domain is the next power
-	// of 2 after pk.Domain[0].Cardinality + 2, which is 2*rho*pk.Domain[0].Cardinality
-	tmpDomain := fft.NewDomain(2 * rho * pk.Domain[0].Cardinality)
-	vk.GenOpening.Set(&tmpDomain.Generator)
+	// FRI degree bound: the largest committed polynomial is the blinded Z,
+	// with Cardinality+3 coefficients (L, R, O and h1, h2, h3 have
+	// Cardinality+2, the preprocessed ones Cardinality).
+	vk.DegreeBound = ecc.NextPowerOfTwo(pk.Domain[0].Cardinality + 3)
+	var err error
+	if vk.Fri, err = nativefri.NewScheme(vk.DegreeBound, sha256.New()); err != nil {
+		return nil, nil, err
+	}
 
 	// public polynomials corresponding to constraints: [ placholders | constraints | assertions ]
 	pk.EvaluationQlDomainBigBitReversed = make([]fr.Element, pk.Domain[1].Cardinality)
@@ -213,28 +240,6 @@ func Setup(spr *cs.SparseR1CS) (*ProvingKey, *VerifyingKey, error) {
 	copy(pk.CQr, pk.EvaluationQrDomainBigBitReversed)
 	copy(pk.CQm, pk.EvaluationQmDomainBigBitReversed)
 	copy(pk.CQo, pk.EvaluationQoDomainBigBitReversed)
-	var err error
-	vk.Qpp[0], err = vk.Iopp.BuildProofOfProximity(pk.CQl)
-	if err != nil {
-		return &pk, &vk, err
-	}
-	vk.Qpp[1], err = vk.Iopp.BuildProofOfProximity(pk.CQr)
-	if err != nil {
-		return &pk, &vk, err
-	}
-	vk.Qpp[2], err = vk.Iopp.BuildProofOfProximity(pk.CQm)
-	if err != nil {
-		return &pk, &vk, err
-	}
-	vk.Qpp[3], err = vk.Iopp.BuildProofOfProximity(pk.CQo)
-	if err != nil {
-		return &pk, &vk, err
-	}
-	vk.Qpp[4], err = vk.Iopp.BuildProofOfProximity(pk.CQkIncomplete)
-	if err != nil {
-		return &pk, &vk, err
-	}
-
 	pk.Domain[1].FFT(pk.EvaluationQlDomainBigBitReversed, fft.DIF, fft.OnCoset())
 	pk.Domain[1].FFT(pk.EvaluationQrDomainBigBitReversed, fft.DIF, fft.OnCoset())
 	pk.Domain[1].FFT(pk.EvaluationQmDomainBigBitReversed, fft.DIF, fft.OnCoset())
@@ -244,10 +249,14 @@ func Setup(spr *cs.SparseR1CS) (*ProvingKey, *VerifyingKey, error) {
 	buildPermutation(spr, &pk)
 
 	// set s1, s2, s3
-	err = computePermutationPolynomials(&pk, &vk)
+	computePermutationPolynomials(&pk)
+
+	// commit to the preprocessed polynomials (one Merkle tree)
+	pk.Pre, err = vk.Fri.Commit(pk.CQl, pk.CQr, pk.CQm, pk.CQo, pk.CQkIncomplete, pk.CS[0], pk.CS[1], pk.CS[2])
 	if err != nil {
-		return &pk, &vk, err
+		return nil, nil, err
 	}
+	vk.Pre = pk.Pre.Commitment
 
 	return &pk, &vk, nil
 
@@ -329,7 +338,7 @@ func buildPermutation(spr *cs.SparseR1CS, pk *ProvingKey) {
 // \---------------/       \--------------------/        \------------------------/
 //
 //	s1 (LDE)                s2 (LDE)                          s3 (LDE)
-func computePermutationPolynomials(pk *ProvingKey, vk *VerifyingKey) error {
+func computePermutationPolynomials(pk *ProvingKey) {
 
 	nbElmt := int(pk.Domain[0].Cardinality)
 
@@ -359,26 +368,6 @@ func computePermutationPolynomials(pk *ProvingKey, vk *VerifyingKey) error {
 	fft.BitReverse(pk.EvaluationId1BigDomain[:pk.Domain[0].Cardinality])
 	fft.BitReverse(pk.EvaluationId2BigDomain[:pk.Domain[0].Cardinality])
 	fft.BitReverse(pk.EvaluationId3BigDomain[:pk.Domain[0].Cardinality])
-	vk.IdCanonical[0] = make([]fr.Element, pk.Domain[0].Cardinality)
-	vk.IdCanonical[1] = make([]fr.Element, pk.Domain[0].Cardinality)
-	vk.IdCanonical[2] = make([]fr.Element, pk.Domain[0].Cardinality)
-	copy(vk.IdCanonical[0], pk.EvaluationId1BigDomain)
-	copy(vk.IdCanonical[1], pk.EvaluationId2BigDomain)
-	copy(vk.IdCanonical[2], pk.EvaluationId3BigDomain)
-
-	var err error
-	vk.Idpp[0], err = vk.Iopp.BuildProofOfProximity(pk.EvaluationId1BigDomain)
-	if err != nil {
-		return err
-	}
-	vk.Idpp[1], err = vk.Iopp.BuildProofOfProximity(pk.EvaluationId2BigDomain)
-	if err != nil {
-		return err
-	}
-	vk.Idpp[2], err = vk.Iopp.BuildProofOfProximity(pk.EvaluationId3BigDomain)
-	if err != nil {
-		return err
-	}
 	pk.Domain[1].FFT(pk.EvaluationId1BigDomain, fft.DIF, fft.OnCoset())
 	pk.Domain[1].FFT(pk.EvaluationId2BigDomain, fft.DIF, fft.OnCoset())
 	pk.Domain[1].FFT(pk.EvaluationId3BigDomain, fft.DIF, fft.OnCoset())
@@ -390,31 +379,13 @@ func computePermutationPolynomials(pk *ProvingKey, vk *VerifyingKey) error {
 	fft.BitReverse(pk.EvaluationS2BigDomain[:pk.Domain[0].Cardinality])
 	fft.BitReverse(pk.EvaluationS3BigDomain[:pk.Domain[0].Cardinality])
 
-	// commit S1, S2, S3
-	vk.SCanonical[0] = make([]fr.Element, pk.Domain[0].Cardinality)
-	vk.SCanonical[1] = make([]fr.Element, pk.Domain[0].Cardinality)
-	vk.SCanonical[2] = make([]fr.Element, pk.Domain[0].Cardinality)
-	copy(vk.SCanonical[0], pk.EvaluationS1BigDomain[:pk.Domain[0].Cardinality])
-	copy(vk.SCanonical[1], pk.EvaluationS2BigDomain[:pk.Domain[0].Cardinality])
-	copy(vk.SCanonical[2], pk.EvaluationS3BigDomain[:pk.Domain[0].Cardinality])
-	vk.Spp[0], err = vk.Iopp.BuildProofOfProximity(vk.SCanonical[0])
-	if err != nil {
-		return err
-	}
-	vk.Spp[1], err = vk.Iopp.BuildProofOfProximity(vk.SCanonical[1])
-	if err != nil {
-		return err
-	}
-	vk.Spp[2], err = vk.Iopp.BuildProofOfProximity(vk.SCanonical[2])
-	if err != nil {
-		return err
+	for k, e := range [][]fr.Element{pk.EvaluationS1BigDomain, pk.EvaluationS2BigDomain, pk.EvaluationS3BigDomain} {
+		pk.CS[k] = make([]fr.Element, pk.Domain[0].Cardinality)
+		copy(pk.CS[k], e[:pk.Domain[0].Cardinality])
 	}
 	pk.Domain[1].FFT(pk.EvaluationS1BigDomain, fft.DIF, fft.OnCoset())
 	pk.Domain[1].FFT(pk.EvaluationS2BigDomain, fft.DIF, fft.OnCoset())
 	pk.Domain[1].FFT(pk.EvaluationS3BigDomain, fft.DIF, fft.OnCoset())
-
-	return nil
-
 }
 
 // getIDSmallDomain returns the Lagrange form of ID on the small domain

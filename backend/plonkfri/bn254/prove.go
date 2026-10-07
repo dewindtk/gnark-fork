@@ -17,6 +17,8 @@
 package plonkfri
 
 import (
+	"errors"
+	"hash"
 	"math/big"
 	"math/bits"
 	"runtime"
@@ -36,47 +38,149 @@ import (
 	"github.com/consensys/gnark/internal/utils"
 )
 
+// Proof is a plonkfri proof: three Merkle roots (one per prover round), the
+// evaluations of every polynomial at zeta (and of Z at ω·zeta), and one
+// batched DEEP-FRI proof that those evaluations are correct and that every
+// committed polynomial is low-degree.
 type Proof struct {
-	// commitments to the solution vectors
-	LROpp [3]nativefri.ProofOfProximity
+	// Merkle roots of the commitments to (l, r, o), z and (h1, h2, h3)
+	LRO, Z, H []byte
 
-	// commitment to Z (permutation polynomial)
-	// Z   Commitment
-	Zpp nativefri.ProofOfProximity
+	// claimed evaluations at zeta, and of z at ω·zeta
+	Evals    Evaluations
+	ZShifted fr.Element
 
-	// commitment to h1,h2,h3 such that h = h1 + X**n*h2 + X**2nh3 the quotient polynomial
-	Hpp [3]nativefri.ProofOfProximity
+	// batched opening of all the claims
+	Opening *nativefri.BatchProof
+}
 
-	// opening proofs for L, R, O
-	OpeningsLROmp [3]nativefri.OpeningProof
+// Evaluations holds the claimed values at zeta.
+type Evaluations struct {
+	Ql, Qr, Qm, Qo, Qk, S1, S2, S3 fr.Element // preprocessed
+	L, R, O, Z, H1, H2, H3         fr.Element // prover's
+}
 
-	// opening proofs for Z, Zu
-	OpeningsZmp [2]nativefri.OpeningProof
+// ErrZetaInDomain is returned when zeta falls in the circuit domain H or the
+// FRI evaluation domain (probability ~2^-230 for an honest prover).
+var ErrZetaInDomain = errors.New("plonkfri: zeta lies in the circuit or evaluation domain")
 
-	// opening proof for H
-	OpeningsHmp [3]nativefri.OpeningProof
+// indices of the commitments in the batched opening
+const (
+	comPre = iota
+	comLRO
+	comZ
+	comH
+)
 
-	// opening proofs for ql, qr, qm, qo, qk
-	OpeningsQlQrQmQoQkincompletemp [5]nativefri.OpeningProof
+// commitments lists the commitments in the order of the batched opening.
+func (proof *Proof) commitments(vk *VerifyingKey) []nativefri.Commitment {
+	return []nativefri.Commitment{
+		vk.Pre,
+		{Root: proof.LRO, NbPolys: 3},
+		{Root: proof.Z, NbPolys: 1},
+		{Root: proof.H, NbPolys: 3},
+	}
+}
 
-	// openings of S1, S2, S3
-	// OpeningsS1S2S3   [3]OpeningProof
-	OpeningsS1S2S3mp [3]nativefri.OpeningProof
+// claims lists the opening claims; prover and verifier both build them here
+// so their order -- which fixes the batching coefficients -- is the same.
+func (proof *Proof) claims(vk *VerifyingKey, zeta fr.Element) []nativefri.Claim {
+	e := &proof.Evals
+	var zetaShifted fr.Element
+	zetaShifted.Mul(&zeta, &vk.Generator)
+	return []nativefri.Claim{
+		{
+			Point: zeta,
+			Polys: []nativefri.PolyRef{
+				ref(comPre, preQl), ref(comPre, preQr), ref(comPre, preQm), ref(comPre, preQo), ref(comPre, preQk),
+				ref(comPre, preS1), ref(comPre, preS2), ref(comPre, preS3),
+				ref(comLRO, 0), ref(comLRO, 1), ref(comLRO, 2),
+				ref(comZ, 0),
+				ref(comH, 0), ref(comH, 1), ref(comH, 2),
+			},
+			Values: []fr.Element{
+				e.Ql, e.Qr, e.Qm, e.Qo, e.Qk, e.S1, e.S2, e.S3,
+				e.L, e.R, e.O, e.Z, e.H1, e.H2, e.H3,
+			},
+		},
+		{Point: zetaShifted, Polys: []nativefri.PolyRef{ref(comZ, 0)}, Values: []fr.Element{proof.ZShifted}},
+	}
+}
 
-	// openings of Id1, Id2, Id3
-	OpeningsId1Id2Id3mp [3]nativefri.OpeningProof
+// ref designates polynomial poly of commitment com in the batched opening.
+func ref(com, poly int) nativefri.PolyRef {
+	return nativefri.PolyRef{Commitment: com, Poly: poly}
+}
+
+// transcript is the Fiat-Shamir transcript of a proof, advanced round by
+// round. It starts with the verifying key and the public inputs, then binds
+// each round's Merkle root before deriving that round's challenges (strong
+// Fiat-Shamir, resources/2023-691 Def. 3).
+type transcript struct {
+	fs   *fiatshamir.Transcript
+	vk   *VerifyingKey
+	head [][]byte // VK digest and public inputs, bound with the first root
+}
+
+func newTranscript(h hash.Hash, vk *VerifyingKey, public fr.Vector) *transcript {
+	t := &transcript{fs: fiatshamir.NewTranscript(h, "gamma", "beta", "alpha", "zeta"), vk: vk}
+	t.head = append(t.head, vk.digest())
+	for i := range public {
+		t.head = append(t.head, public[i].Marshal())
+	}
+	return t
+}
+
+// afterLRO returns beta, gamma.
+func (t *transcript) afterLRO(lro []byte) (beta, gamma fr.Element, err error) {
+	if beta, err = deriveRandomness(t.fs, "gamma", append(t.head, lro)...); err != nil {
+		return
+	}
+	gamma, err = deriveRandomness(t.fs, "beta", nil)
+	return
+}
+
+// afterZ returns alpha.
+func (t *transcript) afterZ(z []byte) (fr.Element, error) {
+	return deriveRandomness(t.fs, "alpha", z)
+}
+
+// afterH returns zeta, and the challenge bytes that seed the batched opening.
+// zeta must avoid H (Z_H(zeta) = 0 would make the identity check vacuous: the
+// attack of attack_test.go) and the FRI domain (division by zero in the
+// opening quotients), as must ω·zeta.
+func (t *transcript) afterH(h []byte) (zeta fr.Element, seed []byte, err error) {
+	if err = t.fs.Bind("zeta", h); err != nil {
+		return
+	}
+	if seed, err = t.fs.ComputeChallenge("zeta"); err != nil {
+		return
+	}
+	zeta.SetBytes(seed)
+	var zn, zetaShifted fr.Element
+	zn.Exp(zeta, new(big.Int).SetUint64(t.vk.Size))
+	zetaShifted.Mul(&zeta, &t.vk.Generator)
+	if zn.IsOne() || t.vk.Fri.InDomain(zeta) || t.vk.Fri.InDomain(zetaShifted) {
+		err = ErrZetaInDomain
+	}
+	return
 }
 
 func Prove(spr *cs.SparseR1CS, pk *ProvingKey, fullWitness witness.Witness, opts ...backend.ProverOption) (*Proof, error) {
+	return prove(spr, pk, fullWitness, nil, opts...)
+}
+
+// prove is Prove with one test-only knob: if transcriptPublic is non-nil, it
+// replaces the public inputs bound into Fiat-Shamir, while every polynomial is
+// still computed from fullWitness. An honest prover never does this; tests use
+// it to play a cheater who proves one statement but presents another.
+func prove(spr *cs.SparseR1CS, pk *ProvingKey, fullWitness witness.Witness, transcriptPublic fr.Vector, opts ...backend.ProverOption) (*Proof, error) {
 	opt, err := backend.NewProverConfig(opts...)
 	if err != nil {
 		return nil, err
 	}
 
 	var proof Proof
-
-	// 0 - Fiat Shamir
-	fs := fiatshamir.NewTranscript(opt.ChallengeHash, "gamma", "beta", "alpha", "zeta")
 
 	// 1 - solve the system
 	_solution, err := spr.Solve(fullWitness, opt.SolverOpts...)
@@ -101,7 +205,12 @@ func Prove(spr *cs.SparseR1CS, pk *ProvingKey, fullWitness witness.Witness, opts
 	evaluationRDomainSmall := padToDomain(solution.R, &pk.Domain[0], wire0)
 	evaluationODomainSmall := padToDomain(solution.O, &pk.Domain[0], wire0)
 
-	// 2 - commit to lro
+	if transcriptPublic == nil {
+		transcriptPublic = fw[:len(spr.Public)]
+	}
+	fri := pk.Vk.Fri
+
+	// 2 - commit to l, r, o (one Merkle tree)
 	blindedLCanonical, blindedRCanonical, blindedOCanonical, err := computeBlindedLROCanonical(
 		evaluationLDomainSmall,
 		evaluationRDomainSmall,
@@ -110,41 +219,18 @@ func Prove(spr *cs.SparseR1CS, pk *ProvingKey, fullWitness witness.Witness, opts
 	if err != nil {
 		return nil, err
 	}
-	proof.LROpp[0], err = pk.Vk.Iopp.BuildProofOfProximity(blindedLCanonical)
+	comLROp, err := fri.Commit(blindedLCanonical, blindedRCanonical, blindedOCanonical)
 	if err != nil {
 		return nil, err
 	}
-	proof.LROpp[1], err = pk.Vk.Iopp.BuildProofOfProximity(blindedRCanonical)
-	if err != nil {
-		return nil, err
-	}
-	proof.LROpp[2], err = pk.Vk.Iopp.BuildProofOfProximity(blindedOCanonical)
-	if err != nil {
-		return nil, err
-	}
+	proof.LRO = comLROp.Root
 
-	// 3 - compute Z, challenges are derived using L, R, O + public inputs
-	dataFiatShamir := make([][fr.Bytes]byte, len(spr.Public)+3)
-	for i := 0; i < len(spr.Public); i++ {
-		copy(dataFiatShamir[i][:], fw[i].Marshal())
-	}
-	copy(dataFiatShamir[len(spr.Public)][:], proof.LROpp[0].ID)
-	copy(dataFiatShamir[len(spr.Public)+1][:], proof.LROpp[1].ID)
-	copy(dataFiatShamir[len(spr.Public)+2][:], proof.LROpp[2].ID)
-
-	beta, err := deriveRandomnessFixedSize(fs, "gamma", dataFiatShamir...)
+	// 3 - compute Z; beta, gamma bind the VK, the public inputs and l, r, o
+	fs := newTranscript(opt.ChallengeHash, pk.Vk, transcriptPublic)
+	beta, gamma, err := fs.afterLRO(proof.LRO)
 	if err != nil {
 		return nil, err
 	}
-
-	gamma, err := deriveRandomness(fs, "beta", nil)
-	if err != nil {
-		return nil, err
-	}
-
-	//var beta, gamma fr.Element
-	//beta.SetUint64(9)
-	// gamma.SetString("10")
 	blindedZCanonical, err := computeBlindedZCanonical(
 		evaluationLDomainSmall,
 		evaluationRDomainSmall,
@@ -154,19 +240,18 @@ func Prove(spr *cs.SparseR1CS, pk *ProvingKey, fullWitness witness.Witness, opts
 		return nil, err
 	}
 
-	// 4 - commit Z
-	proof.Zpp, err = pk.Vk.Iopp.BuildProofOfProximity(blindedZCanonical)
+	// 4 - commit to Z
+	comZp, err := fri.Commit(blindedZCanonical)
+	if err != nil {
+		return nil, err
+	}
+	proof.Z = comZp.Root
+	alpha, err := fs.afterZ(proof.Z)
 	if err != nil {
 		return nil, err
 	}
 
 	// 5 - compute H
-	// var alpha fr.Element
-	alpha, err := deriveRandomness(fs, "alpha", proof.Zpp.ID)
-	if err != nil {
-		return nil, err
-	}
-	// alpha.SetUint64(11)
 
 	evaluationQkCompleteDomainBigBitReversed := make([]fr.Element, pk.Domain[1].Cardinality)
 	copy(evaluationQkCompleteDomainBigBitReversed, fw[:len(spr.Public)])
@@ -204,129 +289,62 @@ func Prove(spr *cs.SparseR1CS, pk *ProvingKey, fullWitness witness.Witness, opts
 		evaluationBlindedZDomainBigBitReversed,
 		alpha)
 
-	// 6 - commit to H
-	proof.Hpp[0], err = pk.Vk.Iopp.BuildProofOfProximity(h1Canonical)
+	// 6 - commit to h1, h2, h3 (one Merkle tree), derive zeta
+	comHp, err := fri.Commit(h1Canonical, h2Canonical, h3Canonical)
 	if err != nil {
 		return nil, err
 	}
-	proof.Hpp[1], err = pk.Vk.Iopp.BuildProofOfProximity(h2Canonical)
-	if err != nil {
-		return nil, err
-	}
-	proof.Hpp[2], err = pk.Vk.Iopp.BuildProofOfProximity(h3Canonical)
+	proof.H = comHp.Root
+	zeta, seed, err := fs.afterH(proof.H)
 	if err != nil {
 		return nil, err
 	}
 
-	// 7 - build the opening proofs
-	// compute the size of the domain of evaluation of the committed polynomial,
-	// the opening position. The challenge zeta will be g^{i} where i is the opening
-	// position, and g is the generator of the fri domain.
-	rho := uint64(nativefri.GetRho())
-	friSize := 2 * rho * pk.Vk.Size
-	var bFriSize big.Int
-	bFriSize.SetInt64(int64(friSize))
-	frOpeningPosition, err := deriveRandomness(fs, "zeta", proof.Hpp[0].ID, proof.Hpp[1].ID, proof.Hpp[2].ID)
+	// 7 - evaluations at zeta (and z at ω·zeta), then one batched opening
+	e := &proof.Evals
+	e.Ql = evalCanonical(pk.CQl, zeta)
+	e.Qr = evalCanonical(pk.CQr, zeta)
+	e.Qm = evalCanonical(pk.CQm, zeta)
+	e.Qo = evalCanonical(pk.CQo, zeta)
+	e.Qk = evalCanonical(pk.CQkIncomplete, zeta)
+	e.S1 = evalCanonical(pk.CS[0], zeta)
+	e.S2 = evalCanonical(pk.CS[1], zeta)
+	e.S3 = evalCanonical(pk.CS[2], zeta)
+	e.L = evalCanonical(blindedLCanonical, zeta)
+	e.R = evalCanonical(blindedRCanonical, zeta)
+	e.O = evalCanonical(blindedOCanonical, zeta)
+	e.Z = evalCanonical(blindedZCanonical, zeta)
+	e.H1 = evalCanonical(h1Canonical, zeta)
+	e.H2 = evalCanonical(h2Canonical, zeta)
+	e.H3 = evalCanonical(h3Canonical, zeta)
+	var zetaShifted fr.Element
+	zetaShifted.Mul(&zeta, &pk.Vk.Generator)
+	proof.ZShifted = evalCanonical(blindedZCanonical, zetaShifted)
+
+	if testHookBeforeOpen != nil {
+		testHookBeforeOpen(&proof, transcriptPublic, beta, gamma, alpha, zeta)
+	}
+	proof.Opening, err = fri.Open(seed,
+		[]*nativefri.Committed{pk.Pre, comLROp, comZp, comHp},
+		proof.claims(pk.Vk, zeta))
 	if err != nil {
 		return nil, err
-	}
-	var bOpeningPosition big.Int
-	bOpeningPosition.SetBytes(frOpeningPosition.Marshal()).Mod(&bOpeningPosition, &bFriSize)
-	openingPosition := bOpeningPosition.Uint64()
-
-	// ql, qr, qm, qo, qkIncomplete
-	proof.OpeningsQlQrQmQoQkincompletemp[0], err = pk.Vk.Iopp.Open(pk.CQl, openingPosition)
-	if err != nil {
-		return &proof, err
-	}
-	proof.OpeningsQlQrQmQoQkincompletemp[1], err = pk.Vk.Iopp.Open(pk.CQr, openingPosition)
-	if err != nil {
-		return &proof, err
-	}
-	proof.OpeningsQlQrQmQoQkincompletemp[2], err = pk.Vk.Iopp.Open(pk.CQm, openingPosition)
-	if err != nil {
-		return &proof, err
-	}
-	proof.OpeningsQlQrQmQoQkincompletemp[3], err = pk.Vk.Iopp.Open(pk.CQo, openingPosition)
-	if err != nil {
-		return &proof, err
-	}
-	proof.OpeningsQlQrQmQoQkincompletemp[4], err = pk.Vk.Iopp.Open(pk.CQkIncomplete, openingPosition)
-	if err != nil {
-		return &proof, err
-	}
-
-	// l, r, o
-	proof.OpeningsLROmp[0], err = pk.Vk.Iopp.Open(blindedLCanonical, openingPosition)
-	if err != nil {
-		return &proof, err
-	}
-	proof.OpeningsLROmp[1], err = pk.Vk.Iopp.Open(blindedRCanonical, openingPosition)
-	if err != nil {
-		return &proof, err
-	}
-	proof.OpeningsLROmp[2], err = pk.Vk.Iopp.Open(blindedOCanonical, openingPosition)
-	if err != nil {
-		return &proof, err
-	}
-
-	// h0, h1, h2
-	proof.OpeningsHmp[0], err = pk.Vk.Iopp.Open(h1Canonical, openingPosition)
-	if err != nil {
-		return &proof, err
-	}
-	proof.OpeningsHmp[1], err = pk.Vk.Iopp.Open(h2Canonical, openingPosition)
-	if err != nil {
-		return &proof, err
-	}
-	proof.OpeningsHmp[2], err = pk.Vk.Iopp.Open(h3Canonical, openingPosition)
-	if err != nil {
-		return &proof, err
-	}
-
-	// s0, s1, s2
-	proof.OpeningsS1S2S3mp[0], err = pk.Vk.Iopp.Open(pk.Vk.SCanonical[0], openingPosition)
-	if err != nil {
-		return &proof, err
-	}
-	proof.OpeningsS1S2S3mp[1], err = pk.Vk.Iopp.Open(pk.Vk.SCanonical[1], openingPosition)
-	if err != nil {
-		return &proof, err
-	}
-	proof.OpeningsS1S2S3mp[2], err = pk.Vk.Iopp.Open(pk.Vk.SCanonical[2], openingPosition)
-	if err != nil {
-		return &proof, err
-	}
-
-	// id0, id1, id2
-	proof.OpeningsId1Id2Id3mp[0], err = pk.Vk.Iopp.Open(pk.Vk.IdCanonical[0], openingPosition)
-	if err != nil {
-		return &proof, err
-	}
-	proof.OpeningsId1Id2Id3mp[1], err = pk.Vk.Iopp.Open(pk.Vk.IdCanonical[1], openingPosition)
-	if err != nil {
-		return &proof, err
-	}
-	proof.OpeningsId1Id2Id3mp[2], err = pk.Vk.Iopp.Open(pk.Vk.IdCanonical[2], openingPosition)
-	if err != nil {
-		return &proof, err
-	}
-
-	// zeta is shifted by g, the generator of Z/nZ where n is the number of constraints. We need
-	// to query the "rho" factor from FRI to know by what should be shifted the opening position.
-	// We multiply by 2 because FRI is instantiated with pk.Domain[0].Cardinality+2, which makes
-	// the iop's domain of size rho*(2*pk.Domain[0].Cardinality).
-	shiftedOpeningPosition := (openingPosition + uint64(2*rho)) % friSize
-	proof.OpeningsZmp[0], err = pk.Vk.Iopp.Open(blindedZCanonical, openingPosition)
-	if err != nil {
-		return &proof, err
-	}
-	proof.OpeningsZmp[1], err = pk.Vk.Iopp.Open(blindedZCanonical, shiftedOpeningPosition)
-	if err != nil {
-		return &proof, err
 	}
 
 	return &proof, nil
+}
+
+// testHookBeforeOpen is nil except in tests, where it plays a cheating prover:
+// it may change the claimed evaluations, which are then opened as if true.
+var testHookBeforeOpen func(proof *Proof, public fr.Vector, beta, gamma, alpha, zeta fr.Element)
+
+// evalCanonical evaluates a polynomial given by its coefficients at z.
+func evalCanonical(p []fr.Element, z fr.Element) fr.Element {
+	var r fr.Element
+	for i := len(p) - 1; i >= 0; i-- {
+		r.Mul(&r, &z).Add(&r, &p[i])
+	}
+	return r
 }
 
 // evaluateOrderingDomainBigBitReversed computes the evaluation of Z(uX)g1g2g3-Z(X)f1f2f3 on the odd
@@ -684,24 +702,6 @@ func blindPoly(cp []fr.Element, rou, bo uint64) ([]fr.Element, error) {
 	}
 
 	return res, nil
-}
-
-func deriveRandomnessFixedSize(fs *fiatshamir.Transcript, challenge string, data ...[fr.Bytes]byte) (fr.Element, error) {
-
-	var r fr.Element
-	for _, d := range data {
-		if err := fs.Bind(challenge, d[:]); err != nil {
-			return r, err
-		}
-	}
-
-	b, err := fs.ComputeChallenge(challenge)
-	if err != nil {
-		return r, err
-	}
-	r.SetBytes(b)
-	return r, nil
-
 }
 
 func deriveRandomness(fs *fiatshamir.Transcript, challenge string, data ...[]byte) (fr.Element, error) {
