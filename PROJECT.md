@@ -236,7 +236,7 @@ Done: Phase 0–2 (restore, compile, shared circuit suite 30/30); security fix A
 - Done: test gated behind build tag `fri_gadget_phase3` with a TODO header explaining the mismatch. `go test -tags fri_gadget_phase3 ./std/commitments/fri/` still reproduces the breakage. Port it in Phase 3 (one commit phase, s queries, H(seed‖j) positions in MiMC, root/ID binding), then drop the tag.
 
 **Step 1 — Fix B: out-of-domain `zeta` (DEEP), coset domain, batched opening, VK binding. Blocks "sound".**
-- B1 design: **drafted 2026-10-07 — see "Fix B design (B1)" below, awaiting review.** Covers considerations 1, 3, 5 (coset domain, VK digest, setup binding).
+- B1 design: **approved 2026-10-07 — see "Fix B design (B1)" below.** Covers considerations 1, 3, 5 (coset domain, VK digest, setup binding).
 - B2 `nativefri` API + tests. B3 rewire setup/prove/verify. B4 adversarial tests (red first). Details in the design section.
 
 **Step 2 — Fix C: blinding vs revealed evaluations (zero-knowledge).** Also add a separate random blinding polynomial to the FRI batch (consideration 2, [HK24]). After B the exact count is known: each committed poly is revealed at ~2·86 FRI positions + its `zeta` openings → blinding degree must be ≥ that; FRI degree bound/domain sizing must absorb it. RedShift samples outside D for perfect ZK — check §6.
@@ -252,7 +252,7 @@ Done: Phase 0–2 (restore, compile, shared circuit suite 30/30); security fix A
 - Features: BSB22 commitments, more curves.
 - Housekeeping: `playground_test.go` (keep/delete?), `internal/stats/generate/main.go`.
 
-## Fix B design (B1) — drafted 2026-10-07, for review
+## Fix B design (B1) — approved 2026-10-07
 
 ### B.0 The problem, in one paragraph
 PLONK reduces "the witness satisfies the circuit" to one polynomial identity, checked at one random point `zeta`. That check is only convincing if `zeta` is unpredictable among *all* field elements (Schwartz–Zippel: two different degree-d polynomials agree on ≤ d points out of |F| ≈ 2^254). Today `zeta = GenOpening^position` is one of only 16n FRI-domain points, because our opening mechanism (`VerifyOpening` = a Merkle path) can only reveal values the prover already wrote down — i.e. points of D. So the bad-point fraction is ~d/16n instead of ~d/2^254, and 1/16 of the time `zeta ∈ H` where `Z_H(zeta)=0` makes the check vacuous (concern 2). No parameter fixes this: we need a way to prove `f(z)=v` for a `z` the prover never committed to. That is the DEEP method.
@@ -305,7 +305,7 @@ Notation: n = |H|, u = coset shift for the permutation (`CosetShift`), ω = gene
 - Proof size at 65k constraints: ~0.9 MB (4 tree openings ≈ 3.5 KB/query + FRI layers ≈ 7 KB/query, × 86) vs 4.8 MB today.
 - Verify: 1 FRI instead of 18 → roughly 10× faster; VK shrinks from O(n) to O(1).
 
-### B.6 Questions for review
+### B.6 Questions for review — answered 2026-10-07: yes to all three (multi-poly leaves; reject ζ ∈ D' ∪ H; accept 2× FRI size for now)
 1. **D5 multi-poly leaves** — recommended; the alternative (one tree per poly) is a smaller diff but keeps ~15 Merkle paths per query.
 2. **D1 on ζ ∈ D' ∪ H**: reject (honest prover fails with prob ~2^-230) vs re-derive with a counter. Recommended: reject — simpler, standard.
 3. FRI code is 2× larger than needed (degrees ~n+3 force k = 2n). Accept for now; optimization later (e.g. smaller blinding or splitting).
@@ -383,4 +383,4 @@ Measured per-query acceptance of garbage = 1/8 = ρ, i.e. the conjectured regime
 - **Step 0**: gadget test gated behind `fri_gadget_phase3` (commit `ef94dacb`). Reasoning: a reshape of the proof struct would compile but still fail — gadget and nativefri query *different positions* (`seed mod |D|` vs `H(seed‖j) mod |D|`), so a real port is needed (Phase 3). Verified the whole tree's test packages compile (`go test -run XXX ./...`), nativefri + plonkfri suites green.
 - **Measured the coset-domain ZK leak** with a throwaway probe (60 secret wires): each of L/R/O reveals 172 codeword values per proof, 5–11 of which are raw secret wire values (≈172/16 expected) — so consideration 1 is a concrete break, not a theoretical one.
 - **B1 design written** ("Fix B design (B1)"). Key reading: `2022-1216` §4–5 (DEEP PCS, Protocol 3, Thm 8) turned out to be an almost direct template; `2023-1071` §2.4 OPlonky for the PLONK/F-S side; `2021-582` §3.5 for multi-column Merkle leaves. Decisions D1–D10; 86 queries remain valid (D8); setup binding resolved (D9); Id polys dropped (D6). App. C of `2023-1071` (parallel repetition subtlety) only concerns t>1 in small fields — not us.
-- Next: user review of B.6 questions, then B4's red-first attack test, then B2.
+- Design approved (B.6: yes to all three). Next: B4's red-first attack test, then B2.
