@@ -17,6 +17,8 @@ Reference papers, all in `resources/` (committed):
 - `Revision2OfTR17-134.pdf` — Fast Reed-Solomon Interactive Oracle Proofs of Proximity (the original FRI paper, Ben-Sasson/Bentov/Horesh/Riabzev)
 - `2019-336 (1).pdf` — DEEP-FRI: Sampling Outside the Box Improves Soundness
 - `2020-654.pdf` — Proximity Gaps for Reed–Solomon Codes
+- `2026-1983.pdf` — Akita: lattice-based multilinear PCS (Module-SIS, transparent; ROM only, no ZK yet), used in Jolt. Copy from https://assets.layerzero.network/pdf/akita.pdf
+- WHIR (ePrint 2024/1586) — not yet in `resources/`: ePrint's Cloudflare check blocks scripted download; save manually as `2024-1586.pdf`
 - `out.txt` — plain-text extraction of the RedShift paper, used for quick grep/search during the design walkthrough
 
 `std/recursion/plonk` (in-circuit recursive PLONK verification) is deeply KZG/pairing-specific (G1El/G2El, emulated field arithmetic) — a FRI backend cannot plug into it. A FRI-based recursive verifier would be new, built on `std/commitments/fri`, and is out of scope for v1.
@@ -429,6 +431,8 @@ Estimates (C.6) vs measured: +58 KB vs +60 KB at 65k; +5–10 % prove vs +7 %; t
 
 ### C.7 Open points
 1. Reconcile HK24 eq. (9)/(10) counting of FRI query points (one vs pair) — affects only whether 173 could be 87 later.
+   - Checked 2026-10-21 (re-read `2024-1037` §2 and §4.1): **not a domain difference** — HK24 assumes the same setting as ours (D a disjoint union of cosets of H, D ∩ H = ∅). The difference is the counting: HK24 models the FRI queries as a set Q_D ⊆ D with |Q_D| ≤ n_D, i.e. **one point x per query round**; the sibling −x is not counted. Their factor 2 in (10) is from the shift g·z ("due to translates by g"), not from ±x. So our witness bound 174 = 2·(1 + 86) matches (10) numerically but for a different reason (we count ζ, ωζ and both ±y). Still open: whether the sibling value of a revealed pair leaks beyond what HK24's model covers; until then keep 173 (and 174).
+   - Follow-up the same day: 87 has **no full proof** in the paper — Lemma 4 (canonical split) is a proof sketch that reuses Lemma 1's argument. That argument (Lemma 1, full proof) is stated over the *set of revealed points* Q = Q_F ∪ Q_D: values are uniform when the randomizer has ≥ |Q| coefficients. 87 comes from instantiating |Q_D| = n_D, i.e. one point per FRI query (their simulator samples x₁…x_{n_D} and uses them as the query points). Our FRI reveals x and −x per query, so |Q_D| = 2·n_D and the same lemma gives 1 + 172 = **173**. Conclusion: the lemma supports 173 for our FRI; the 87 is an instantiation for a one-point-per-query model, not a contradicting bound. Not yet reviewed by anyone else.
 2. ZK is *honest-verifier* in the IOP; with Fiat-Shamir it becomes NIZK in the random-oracle model (standard; BCS) — no extra work, noted for the write-up.
 3. Prover randomness comes from `fr.SetRandom` (crypto/rand) — fine; a deterministic RNG would break ZK.
 
@@ -578,3 +582,12 @@ Measured per-query acceptance of garbage = 1/8 = ρ, i.e. the conjectured regime
 ### 2026-10-07 (cont.) — development paused, presentation prepared
 - Development stopped at the user's request; all work merged to `master` (PRs #1–#7 plus this docs PR). Resume at F3 (see "Next steps").
 - Supervisor deck, cut to 8 slides at the user's request: four decision gates (security target, FRI query count, out-of-domain ζ, zero-knowledge), each as problem → academic study → implementation → measured outcome; plus context, benchmarks vs KZG at 65k, status/next steps. Speaker notes carry the reasoning. Link under "Next steps".
+
+### 2026-10-15 → 2026-10-20 — FRI walkthrough, new supervisor deck (.pptx)
+- No code changes. Section-by-section walkthrough of `nativefri.Scheme.Open` (mask R → transcript/λ → DEEP batch q → folding/commit → queries) and the verifier's view, with throwaway measurements (deleted afterwards): λ equals a hand-computed sha256 over the bound statement; ζ-claim point on the coset → `ErrPointInDomain`; honest q has < DegreeBound coefficients, one false claim makes q full-length; honest folds end in a constant, one-too-many coefficients don't.
+- New 10-slide .pptx for the supervisor (replaces the 8-slide artifact), structured by what was done: summary → (1) literature-based corrections (change / justification / effect) → (2) batched opening (18 FRI proofs → 1; 4.8 → 0.84 MB) → (3) testing (attack tests with before/after and rejecting check; structural ZK rank test) → (4) FRI in detail (inputs; 16 claims → one degree test; folding + 86 queries) → results vs KZG + next steps → WHIR outlook (not implemented). Short descriptive titles; detail in speaker notes. Kept outside the repo (`~/Desktop/FRI-PLONK-supervisor.pptx`).
+- Open question raised on the last slide: harden FRI (F1–F7) vs prototype WHIR behind the `Scheme` interface.
+
+### 2026-10-23 — WHIR / Akita exploration
+- Both are multilinear PCSs; WHIR also supports univariate queries. Option A (realistic next experiment): WHIR behind the existing `Scheme` Commit/Open/Verify, PLONK unchanged (univariate f(ζ) = inner product with ⊗ⱼ(1, ζ^(2^j))). Option B: multilinear PLONK (HyperPlonk-style, sumcheck) — a new backend; the only fit for Akita. Open for either: ZK construction (HK24 is FRI-specific), parameter analysis.
+- Akita paper added to `resources/`; WHIR PDF pending manual download.
