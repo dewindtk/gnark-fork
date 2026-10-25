@@ -19,6 +19,9 @@ Reference papers, all in `resources/` (committed):
 - `2020-654.pdf` — Proximity Gaps for Reed–Solomon Codes
 - `2026-1983.pdf` — Akita: lattice-based multilinear PCS (Module-SIS, transparent; ROM only, no ZK yet), used in Jolt. Copy from https://assets.layerzero.network/pdf/akita.pdf
 - `2024-1586.pdf` — WHIR: Reed–Solomon Proximity Testing with Super-Fast Verification (Arnon/Chiesa/Fenzi/Yogev); IOPP for constrained RS codes, multilinear and univariate queries
+- `2026-391.pdf` — Zero-Knowledge IOPPs for Constrained Interleaved Codes (Chiesa/Fenzi/Weissenberg): honest-verifier ZK variant of WHIR (mask oracles in sumcheck and code-switching rounds)
+- `2026-1367.pdf` — SoK: Hash-Based Polynomial Commitments and Low-Degree Tests, from FRI to Basefold, STIR and WHIR
+- `2017-305.pdf` — A Zero Knowledge Sumcheck and its Applications (Chiesa/Forbes/Spooner): background for ZK sumcheck
 - `out.txt` — plain-text extraction of the RedShift paper, used for quick grep/search during the design walkthrough
 
 `std/recursion/plonk` (in-circuit recursive PLONK verification) is deeply KZG/pairing-specific (G1El/G2El, emulated field arithmetic) — a FRI backend cannot plug into it. A FRI-based recursive verifier would be new, built on `std/commitments/fri`, and is out of scope for v1.
@@ -591,3 +594,4 @@ Measured per-query acceptance of garbage = 1/8 = ρ, i.e. the conjectured regime
 ### 2026-10-23 — WHIR / Akita exploration
 - Both are multilinear PCSs; WHIR also supports univariate queries. Option A (realistic next experiment): WHIR behind the existing `Scheme` Commit/Open/Verify, PLONK unchanged (univariate f(ζ) = inner product with ⊗ⱼ(1, ζ^(2^j))). Option B: multilinear PLONK (HyperPlonk-style, sumcheck) — a new backend; the only fit for Akita. Open for either: ZK construction (HK24 is FRI-specific), parameter analysis.
 - Akita and WHIR papers added to `resources/`.
+- Read both papers (2026-10-25). WHIR: feasible behind `Scheme` (bn254 Fr: char ≠ 2, 2²⁸ smooth subgroup, 254-bit field so no extension needed); univariate claims via weight Z·eq(X, (ζ, ζ², …)). But only WHIR-UD is proven; JB and CB rest on Conjecture 4.12 (mutual correlated agreement), and at 128 bits UD is ~2–4× the size of CB (Table 5). No ZK in the paper; a later paper gives an honest-verifier ZK variant (Chiesa/Fenzi/Weissenberg, ePrint 2026/391, "negligible overhead"; implemented in Plonky3 and the WHIR reference repo); in `resources/`, not yet read. Akita: not feasible on bn254 Fr without new parameters/analysis (implemented for 32/64/128-bit primes with partial splitting, q ≡ 2s+1 mod 4s; r ≡ 1 mod 2²⁸ splits X^d + 1 fully); adds Module-SIS, ROM only, no ZK; its pay-per-bit advantage does not apply to dense PLONK polynomials.
