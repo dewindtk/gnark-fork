@@ -18,7 +18,7 @@ Reference papers, all in `resources/` (committed):
 - `2019-336 (1).pdf` — DEEP-FRI: Sampling Outside the Box Improves Soundness
 - `2020-654.pdf` — Proximity Gaps for Reed–Solomon Codes
 - `2026-1983.pdf` — Akita: lattice-based multilinear PCS (Module-SIS, transparent; ROM only, no ZK yet), used in Jolt. Copy from https://assets.layerzero.network/pdf/akita.pdf
-- WHIR (ePrint 2024/1586) — not yet in `resources/`: ePrint's Cloudflare check blocks scripted download; save manually as `2024-1586.pdf`
+- `2024-1586.pdf` — WHIR: Reed–Solomon Proximity Testing with Super-Fast Verification (Arnon/Chiesa/Fenzi/Yogev); IOPP for constrained RS codes, multilinear and univariate queries
 - `out.txt` — plain-text extraction of the RedShift paper, used for quick grep/search during the design walkthrough
 
 `std/recursion/plonk` (in-circuit recursive PLONK verification) is deeply KZG/pairing-specific (G1El/G2El, emulated field arithmetic) — a FRI backend cannot plug into it. A FRI-based recursive verifier would be new, built on `std/commitments/fri`, and is out of scope for v1.
@@ -590,4 +590,4 @@ Measured per-query acceptance of garbage = 1/8 = ρ, i.e. the conjectured regime
 
 ### 2026-10-23 — WHIR / Akita exploration
 - Both are multilinear PCSs; WHIR also supports univariate queries. Option A (realistic next experiment): WHIR behind the existing `Scheme` Commit/Open/Verify, PLONK unchanged (univariate f(ζ) = inner product with ⊗ⱼ(1, ζ^(2^j))). Option B: multilinear PLONK (HyperPlonk-style, sumcheck) — a new backend; the only fit for Akita. Open for either: ZK construction (HK24 is FRI-specific), parameter analysis.
-- Akita paper added to `resources/`; WHIR PDF pending manual download.
+- Akita and WHIR papers added to `resources/`.
