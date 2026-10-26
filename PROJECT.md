@@ -17,6 +17,11 @@ Reference papers, all in `resources/` (committed):
 - `Revision2OfTR17-134.pdf` — Fast Reed-Solomon Interactive Oracle Proofs of Proximity (the original FRI paper, Ben-Sasson/Bentov/Horesh/Riabzev)
 - `2019-336 (1).pdf` — DEEP-FRI: Sampling Outside the Box Improves Soundness
 - `2020-654.pdf` — Proximity Gaps for Reed–Solomon Codes
+- `2026-1983.pdf` — Akita: lattice-based multilinear PCS (Module-SIS, transparent; ROM only, no ZK yet), used in Jolt. Copy from https://assets.layerzero.network/pdf/akita.pdf
+- `2024-1586.pdf` — WHIR: Reed–Solomon Proximity Testing with Super-Fast Verification (Arnon/Chiesa/Fenzi/Yogev); IOPP for constrained RS codes, multilinear and univariate queries
+- `2026-391.pdf` — Zero-Knowledge IOPPs for Constrained Interleaved Codes (Chiesa/Fenzi/Weissenberg): honest-verifier ZK variant of WHIR (mask oracles in sumcheck and code-switching rounds)
+- `2026-1367.pdf` — SoK: Hash-Based Polynomial Commitments and Low-Degree Tests, from FRI to Basefold, STIR and WHIR
+- `2017-305.pdf` — A Zero Knowledge Sumcheck and its Applications (Chiesa/Forbes/Spooner): background for ZK sumcheck
 - `out.txt` — plain-text extraction of the RedShift paper, used for quick grep/search during the design walkthrough
 
 `std/recursion/plonk` (in-circuit recursive PLONK verification) is deeply KZG/pairing-specific (G1El/G2El, emulated field arithmetic) — a FRI backend cannot plug into it. A FRI-based recursive verifier would be new, built on `std/commitments/fri`, and is out of scope for v1.
@@ -250,6 +255,16 @@ Done: Phase 0–2 (restore, compile, shared circuit suite 30/30); security fix A
 
 **After "sound + ZK"** → see **"Follow-ups (after fixes A–C)"** below (F1–F12, prioritized).
 
+**Next steps (decided order, 2026-10-07)** — all of fixes A–C are merged (PRs #1–#7); master is green.
+1. **F3 concurrency** (small, concrete): `nativefri.Scheme` takes a hash constructor; red-first test = parallel Prove/Verify on one VK under `go test -race`.
+2. **F2 serialization** (needed for any real use): `WriteTo`/`ReadFrom` for Proof and VK with canonical decoding; round-trip test, size = `proofSize`, fuzz test that never panics.
+3. **F4 malicious-prover harness**: consolidate the existing cheating hooks into one helper; add the missing cheaters (pointwise-H, broken copy constraint, wrong z(ω·ζ), wrong public row, swapped h pieces) — each 0/N with the rejecting check recorded.
+4. **F5** HK24 87-vs-173 written reconciliation (reading, no code unless airtight).
+5. Then cost (F6 size, F7 prover time — profile first), F9 PQ-target reading, F10 Phase 3.
+- In parallel, outside the code: **F1 external review** — PROJECT.md (designs B1/C1, security table, lessons) + the attack/ZK tests are the claims to hand over.
+
+**Development paused 2026-10-07** for a supervisor presentation. Resume at item 1 (F3). Presentation deck (decisions, arguments, benchmarks): https://claude.ai/artifact/PWgnNpgaFTsa8dXZqFtcZP
+
 ## Follow-ups (after fixes A–C) — recorded 2026-10-07
 
 Status at this point: plonkfri on bn254 is sound (fix A + B) and honest-verifier zero-knowledge (fix C) by construction, with a test per mechanism; **not externally reviewed**. Items are grouped by when they matter; within a group, roughly by priority. Each has a "done when" so it can be worked test-first like A–C.
@@ -419,6 +434,8 @@ Estimates (C.6) vs measured: +58 KB vs +60 KB at 65k; +5–10 % prove vs +7 %; t
 
 ### C.7 Open points
 1. Reconcile HK24 eq. (9)/(10) counting of FRI query points (one vs pair) — affects only whether 173 could be 87 later.
+   - Checked 2026-10-21 (re-read `2024-1037` §2 and §4.1): **not a domain difference** — HK24 assumes the same setting as ours (D a disjoint union of cosets of H, D ∩ H = ∅). The difference is the counting: HK24 models the FRI queries as a set Q_D ⊆ D with |Q_D| ≤ n_D, i.e. **one point x per query round**; the sibling −x is not counted. Their factor 2 in (10) is from the shift g·z ("due to translates by g"), not from ±x. So our witness bound 174 = 2·(1 + 86) matches (10) numerically but for a different reason (we count ζ, ωζ and both ±y). Still open: whether the sibling value of a revealed pair leaks beyond what HK24's model covers; until then keep 173 (and 174).
+   - Follow-up the same day: 87 has **no full proof** in the paper — Lemma 4 (canonical split) is a proof sketch that reuses Lemma 1's argument. That argument (Lemma 1, full proof) is stated over the *set of revealed points* Q = Q_F ∪ Q_D: values are uniform when the randomizer has ≥ |Q| coefficients. 87 comes from instantiating |Q_D| = n_D, i.e. one point per FRI query (their simulator samples x₁…x_{n_D} and uses them as the query points). Our FRI reveals x and −x per query, so |Q_D| = 2·n_D and the same lemma gives 1 + 172 = **173**. Conclusion: the lemma supports 173 for our FRI; the 87 is an instantiation for a one-point-per-query model, not a contradicting bound. Not yet reviewed by anyone else.
 2. ZK is *honest-verifier* in the IOP; with Fiat-Shamir it becomes NIZK in the random-oracle model (standard; BCS) — no extra work, noted for the write-up.
 3. Prover randomness comes from `fr.SetRandom` (crypto/rand) — fine; a deterministic RNG would break ZK.
 
@@ -561,3 +578,35 @@ Measured per-query acceptance of garbage = 1/8 = ρ, i.e. the conjectured regime
 ### 2026-10-07 (cont.) — follow-ups documented
 - New section "Follow-ups (after fixes A–C)": F1–F12 grouped as before-real-use (review, serialization, concurrency), robustness (malicious-prover harness, HK24 87-vs-173), cost (size, prover time, tiny circuits), research (PQ target), later phases (in-circuit verifier, features, housekeeping). Each with why / approach / "done when", so the next work can start test-first.
 - Branch `pq-pcs-followups` (stacked on PR #6, which was still open).
+
+### 2026-10-07 (cont.) — next steps fixed
+- PRs #6 (fix C) and #7 (follow-ups) merged. Order decided: F3 → F2 → F4 → F5 → cost/research/Phase 3; F1 review in parallel. Recorded under "Open questions / next steps".
+
+### 2026-10-07 (cont.) — development paused, presentation prepared
+- Development stopped at the user's request; all work merged to `master` (PRs #1–#7 plus this docs PR). Resume at F3 (see "Next steps").
+- Supervisor deck, cut to 8 slides at the user's request: four decision gates (security target, FRI query count, out-of-domain ζ, zero-knowledge), each as problem → academic study → implementation → measured outcome; plus context, benchmarks vs KZG at 65k, status/next steps. Speaker notes carry the reasoning. Link under "Next steps".
+
+### 2026-10-15 → 2026-10-20 — FRI walkthrough, new supervisor deck (.pptx)
+- No code changes. Section-by-section walkthrough of `nativefri.Scheme.Open` (mask R → transcript/λ → DEEP batch q → folding/commit → queries) and the verifier's view, with throwaway measurements (deleted afterwards): λ equals a hand-computed sha256 over the bound statement; ζ-claim point on the coset → `ErrPointInDomain`; honest q has < DegreeBound coefficients, one false claim makes q full-length; honest folds end in a constant, one-too-many coefficients don't.
+- New 10-slide .pptx for the supervisor (replaces the 8-slide artifact), structured by what was done: summary → (1) literature-based corrections (change / justification / effect) → (2) batched opening (18 FRI proofs → 1; 4.8 → 0.84 MB) → (3) testing (attack tests with before/after and rejecting check; structural ZK rank test) → (4) FRI in detail (inputs; 16 claims → one degree test; folding + 86 queries) → results vs KZG + next steps → WHIR outlook (not implemented). Short descriptive titles; detail in speaker notes. Kept outside the repo (`~/Desktop/FRI-PLONK-supervisor.pptx`).
+- Open question raised on the last slide: harden FRI (F1–F7) vs prototype WHIR behind the `Scheme` interface.
+
+### 2026-10-23 — WHIR / Akita exploration
+- Both are multilinear PCSs; WHIR also supports univariate queries. Option A (realistic next experiment): WHIR behind the existing `Scheme` Commit/Open/Verify, PLONK unchanged (univariate f(ζ) = inner product with ⊗ⱼ(1, ζ^(2^j))). Option B: multilinear PLONK (HyperPlonk-style, sumcheck) — a new backend; the only fit for Akita. Open for either: ZK construction (HK24 is FRI-specific), parameter analysis.
+- Akita and WHIR papers added to `resources/`.
+- Akita feasibility in gnark (2026-10-25): not feasible as an extension of `backend/plonkfri`. (1) bn254 Fr (2-adicity 28) is outside Akita's partial-splitting condition q ≡ 2s+1 (mod 4s); its profiles are 2³²−99, 2⁶⁴−59 (≡ 5 mod 8, 2-adicity 2) and 2¹²⁸−2³²+22537 (2-adicity 3). (2) Conversely those moduli have no large power-of-two subgroups, so FFT-based univariate PLONK cannot run over them — Akita forces both a field change and a multilinear (sumcheck) PIOP, i.e. a new backend. (3) Reusable in gnark/gnark-crypto: field generator, Ring-SIS hashing (Vortex; but over NTT-friendly fully split primes), GKR sumcheck, small-field constraint systems. Missing: non-NTT ring arithmetic, gadget decomposition, norm/range checks, folding recursion, planner (could be run offline with the Rust tool). Plus Module-SIS assumption, ROM only, no ZK.
+- Read `2026-1367` (SoK), `2026-391` (ZK-WHIR), `2017-305` (ZK sumcheck) (2026-10-25). Corrections/additions to the above: (1) mutual correlated agreement for RS is proven up to the Johnson bound by Haböck, ePrint 2025/2110 (preprint, not yet read) — so WHIR-JB, not only WHIR-UD, is proven (WHIR Table 5: JB 299 KiB vs UD 621 KiB at 2²⁴, ρ = 1/2, 128 bits). (2) The up-to-capacity conjectures (CA, MCA, list size) were disproved over large fields in Nov 2025 (Crites–Stewart 2025/2046; Ben-Sasson et al. 2025/2055); Johnson-bound results unaffected — supports our proven-Johnson FRI decision; WHIR's headline (CB) figures used the refuted form. (3) ZK-WHIR gives HVZK with 1 + o(1) overhead; soundness parametrised by the MCA error (so proven at Johnson via 2025/2110); RS ZK encoding = t random coefficients (Prop. 3.19), same mechanism as our blinding; covers the PCS and an R1CS reduction, not PLONK; no benchmarks in the paper. (4) `2017-305` is theory (IPCP model); background only.
+- Read both papers (2026-10-25). WHIR: feasible behind `Scheme` (bn254 Fr: char ≠ 2, 2²⁸ smooth subgroup, 254-bit field so no extension needed); univariate claims via weight Z·eq(X, (ζ, ζ², …)). But only WHIR-UD is proven; JB and CB rest on Conjecture 4.12 (mutual correlated agreement), and at 128 bits UD is ~2–4× the size of CB (Table 5). No ZK in the paper; a later paper gives an honest-verifier ZK variant (Chiesa/Fenzi/Weissenberg, ePrint 2026/391, "negligible overhead"; implemented in Plonky3 and the WHIR reference repo); in `resources/`, not yet read. Akita: not feasible on bn254 Fr without new parameters/analysis (implemented for 32/64/128-bit primes with partial splitting, q ≡ 2s+1 mod 4s; r ≡ 1 mod 2²⁸ splits X^d + 1 fully); adds Module-SIS, ROM only, no ZK; its pay-per-bit advantage does not apply to dense PLONK polynomials.
+
+### 2026-10-25 — Lattice PCS survey
+- Report: `reports/Lattice PCS for gnark.md` (notes in `research_notes/Lattice PCS for gnark/`). Conclusion: no lattice-native PCS fits bn254 Fr without new research (all instantiated at ~32–64-bit partially split q; q = r plausible only at d ≤ 32, unparameterised; batching must move to claims; ZK needs lattice-level masking). Closest fit Greyhound (univariate, Module-SIS, ~60 KB, but 74 ms verify, no ZK/QROM/Go). Vortex (gnark-crypto) integrable but lattice only in the column hash, no PQ gain, MB-size proofs, no ZK. WHIR remains the next step.
+
+### 2026-10-25 — Greyhound Phase 0 (IBM-25)
+- Report: `reports/Greyhound phase 0 feasibility.md`; script, output and Go benchmark in `research_notes/Greyhound phase 0/`. q = r, d = 32 is cryptographically plausible: LS18 bound re-derived and toy-tested (‖c − c′‖₂ < r^{1/d}: 243 at d = 32, 15.6 at d = 64 → d ≤ 32); 128-bit challenge set exists (uniform [−8, 8], 2^130.8) but op-norm ≈ 75 vs LaBRADOR's 15, so LaBRADOR bounds must be re-proved; core-SVP shows commitment bits independent of q (κ ≈ 7 at d = 32). Proof size estimated 60–500 KB (< FRI 0.90 MB). Verifier: Fr mul 13.9 ns vs 2.5 ns at 32 bits (measured) → estimated 0.4–2 s vs FRI 4.9 ms.
+- Open: decide goal (lattice PCS with slow verifier → Phase 1 = re-prove LaBRADOR bounds; FRI replacement → WHIR). Need PDFs of ePrint 2017/523, 2022/1341, 2024/1293 to confirm recalled parameters.
+
+### 2026-10-26 — Lattice summary in Linear, deck revisions
+- Linear (project "Master's Thesis: PQ-PCS in Go"): IBM-26 (five properties no lattice PCS combines: small proofs, fast verifier, standard Module-SIS, ZK, QROM; Akita/Greyhound/Hachi/RoKoKo/CMNW shortfalls), IBM-27 (Akita: efforts to implement — new field + multilinear PIOP = new backend), IBM-28 (Hachi, RoKoKo, CMNW feasibility), IBM-29 (why bn254 Fr: reuse of gnark-crypto/PLONK FFT domain for v1, not a requirement), IBM-30 (WHIR vs Akita verdicts and recommendation: WHIR next), IBM-31 (why FFT-friendly fields and lattice schemes conflict: 2-adicity wants X^d+1 to split, lattice challenges want it not to). Phase 0 results posted on IBM-25.
+- Supervisor deck now 10 slides: dropped the "proven, not conjectured" row and the WHIR outlook slide; added a plain-language zero-knowledge slide (witness blinding, FRI mask, randomized quotient split; HK24). Snapshot committed as `presentations/FRI-PLONK-supervisor.pptx`; working copy stays at `~/Desktop/FRI-PLONK-supervisor.pptx`.
+- Greyhound benchmark moved to `research_notes/Greyhound phase 0/_bench/` so `go list ./...` ignores it (the path with a space is an invalid import path).
+- Open: WHIR vs Greyhound Phase 1 decision; ePrint 2017/523, 2022/1341, 2024/1293 PDFs still to confirm recalled parameters.
