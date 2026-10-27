@@ -43,7 +43,7 @@ var (
 // Scheme is a DEEP-FRI batched polynomial commitment scheme for polynomials
 // with fewer than DegreeBound coefficients.
 type Scheme struct {
-	h           hash.Hash
+	newHash     func() hash.Hash
 	degreeBound uint64
 	nbSteps     int
 
@@ -63,12 +63,12 @@ type Scheme struct {
 
 // NewScheme returns a scheme for polynomials with < degreeBound coefficients;
 // degreeBound must be a power of two ≥ 2.
-func NewScheme(degreeBound uint64, h hash.Hash) (*Scheme, error) {
+func NewScheme(degreeBound uint64, newHash func() hash.Hash) (*Scheme, error) {
 	if degreeBound < 2 || degreeBound&(degreeBound-1) != 0 {
 		return nil, fmt.Errorf("degree bound %d is not a power of two ≥ 2", degreeBound)
 	}
 	s := &Scheme{
-		h:           h,
+		newHash:     newHash,
 		degreeBound: degreeBound,
 		nbSteps:     bits.TrailingZeros64(degreeBound),
 		domain:      fft.NewDomain(rho * degreeBound),
@@ -156,7 +156,7 @@ func (s *Scheme) commitEvals(evals [][]fr.Element) *Committed {
 			leaves[i] = append(leaves[i], c.evals[j][i].Marshal()...)
 		}
 	}
-	c.tree = newMerkleTree(s.h, leaves)
+	c.tree = newMerkleTree(s.newHash(), leaves)
 	c.Root = c.tree.root()
 	c.NbPolys = len(polys)
 	return c
@@ -203,7 +203,7 @@ func (s *Scheme) transcript() (*fiatshamir.Transcript, []string) {
 		names = append(names, fmt.Sprintf("x%d", i))
 	}
 	names = append(names, "s0")
-	return fiatshamir.NewTranscript(s.h, names...), names
+	return fiatshamir.NewTranscript(s.newHash(), names...), names
 }
 
 // bindStatement checks the claims and binds everything the proof is about --
@@ -345,7 +345,7 @@ func (s *Scheme) open(seed []byte, committed []*Committed, claims []Claim, mask 
 			for k := range sorted {
 				leaves[k] = sorted[k].Marshal()
 			}
-			trees[i] = newMerkleTree(s.h, leaves)
+			trees[i] = newMerkleTree(s.newHash(), leaves)
 			proof.Roots = append(proof.Roots, trees[i].root())
 			if err := fs.Bind(names[1+i], trees[i].root()); err != nil {
 				return nil, err
@@ -365,7 +365,7 @@ func (s *Scheme) open(seed []byte, committed []*Committed, claims []Claim, mask 
 	}
 
 	// QUERY phase.
-	positions, err := queryPositions(s.h, fs, names[len(names)-1], proof.Evaluation, uint64(n))
+	positions, err := queryPositions(s.newHash(), fs, names[len(names)-1], proof.Evaluation, uint64(n))
 	if err != nil {
 		return nil, err
 	}
@@ -422,7 +422,7 @@ func (s *Scheme) replay(seed []byte, commitments []Commitment, claims []Claim, p
 			return
 		}
 	}
-	positions, err = queryPositions(s.h, fs, names[len(names)-1], proof.Evaluation, uint64(len(s.points)))
+	positions, err = queryPositions(s.newHash(), fs, names[len(names)-1], proof.Evaluation, uint64(len(s.points)))
 	return
 }
 
@@ -455,7 +455,7 @@ func (s *Scheme) verifyBatchQuery(commitments []Commitment, claims []Claim, lamb
 	rows := make([][2][]fr.Element, len(commitments))
 	for c, com := range commitments {
 		op := bq.Commitments[c]
-		if !verifyPair(s.h, com.Root, op, p, n) {
+		if !verifyPair(s.newHash(), com.Root, op, p, n) {
 			return ErrMerklePath
 		}
 		for side := 0; side < 2; side++ {
@@ -468,7 +468,7 @@ func (s *Scheme) verifyBatchQuery(commitments []Commitment, claims []Claim, lamb
 	}
 	// q starts with the mask R
 	var cur [2]fr.Element
-	if !verifyPair(s.h, proof.Mask, bq.Mask, p, n) {
+	if !verifyPair(s.newHash(), proof.Mask, bq.Mask, p, n) {
 		return ErrMerklePath
 	}
 	for side := 0; side < 2; side++ {
@@ -512,7 +512,7 @@ func (s *Scheme) foldChain(bq *BatchQuery, proof *BatchProof, cur [2]fr.Element,
 			return nil
 		}
 		op := bq.Layers[i]
-		if !verifyPair(s.h, proof.Roots[i], op, si[i+1]/2, n>>uint(i+1)) {
+		if !verifyPair(s.newHash(), proof.Roots[i], op, si[i+1]/2, n>>uint(i+1)) {
 			return ErrMerklePath
 		}
 		for side := 0; side < 2; side++ {

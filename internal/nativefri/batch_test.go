@@ -48,7 +48,7 @@ type batchFixture struct {
 }
 
 func newBatchFixture(t *testing.T, degreeBound uint64) *batchFixture {
-	s, err := NewScheme(degreeBound, sha256.New())
+	s, err := NewScheme(degreeBound, sha256.New)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +94,7 @@ func (f *batchFixture) prove(t *testing.T) *BatchProof {
 // of a·D, and that a·D shares no point with the subgroup D -- hence none with
 // the PLONK domain H ⊂ D (the ZK leak of the old subgroup domain).
 func TestCommitEvaluatesOnCoset(t *testing.T) {
-	s, err := NewScheme(16, sha256.New())
+	s, err := NewScheme(16, sha256.New)
 	if err != nil {
 		t.Fatal(err)
 	}

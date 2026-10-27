@@ -201,7 +201,7 @@ func Setup(spr *cs.SparseR1CS) (*ProvingKey, *VerifyingKey, error) {
 	vk.NbPublicVariables = uint64(len(spr.Public))
 
 	var err error
-	if vk.Fri, err = nativefri.NewScheme(vk.DegreeBound, sha256.New()); err != nil {
+	if vk.Fri, err = nativefri.NewScheme(vk.DegreeBound, sha256.New); err != nil {
 		return nil, nil, err
 	}
 
