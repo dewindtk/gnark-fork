@@ -4,10 +4,10 @@ Single source of truth for execution state (PLAN.md §7.4). Update and commit (`
 
 ## Header
 - **Phase:** kick-off (PLAN §0)
-- **Branch:** `hyperplonk-design` (local, uncommitted) → becomes `feature/hyperplonk` at K2
-- **Last checkpoint commit:** none yet (`master` @ `16a40bc2`)
-- **Next action:** K2 — create `feature/hyperplonk`, commit docs + this ledger, push (**awaiting user OK**)
-- **Pending user decisions:** K2 go-ahead; **D8 Panurus integration model** (panurus#2539 merged by vendoring, PLAN §4)
+- **Branch:** `feature/hyperplonk` (pushed to `origin`)
+- **Last checkpoint commit:** `06ca7bd6` (docs) on `feature/hyperplonk`, based on `master` @ `16a40bc2`
+- **Next action:** K3 hygiene PR to `master`; K7 full briefs for M0a/M1a; K8 allowlist (show to user)
+- **Pending user decisions:** **D8 Panurus integration model** (panurus#2539 merged by vendoring, PLAN §4)
 - **Reference pin:** `WizardOfMenlo/whir@c73b8d3`
 
 ## Restart procedure
@@ -23,15 +23,15 @@ States: todo · ready · running · returned · in-review · merged · blocked �
 | ID | State | Owner | Branch | Base | Last commit | Brief | Report | Updated |
 |---|---|---|---|---|---|---|---|---|
 | K1 | merged | user | master | — | 16a40bc2 | — | — | 2026-10-27 |
-| K2 | blocked (user OK) | coordinator | feature/hyperplonk | 16a40bc2 | — | — | — | 2026-10-27 |
+| K2 | done | coordinator | feature/hyperplonk | 16a40bc2 | 06ca7bd6 | — | — | 2026-10-30 |
 | K3 | todo | coordinator → agent | hp/m-1-hygiene → master | 16a40bc2 | — | briefs/K3.md | — | 2026-10-27 |
 | K4 | done (decision: local gate evidence) | user | — | — | — | — | — | 2026-10-27 |
 | K5 | done (spec edits) | coordinator | hyperplonk-design | — | — | — | — | 2026-10-27 |
-| K6 | ready (files present; commit at K2) | coordinator | feature/hyperplonk | — | — | — | — | 2026-10-30 |
+| K6 | done | coordinator | feature/hyperplonk | 16a40bc2 | cac2903e | — | — | 2026-10-30 |
 | K7 | todo (templates done) | coordinator | feature/hyperplonk | — | — | — | — | 2026-10-27 |
 | K9 | done (session log) | coordinator | — | — | — | — | — | 2026-10-27 |
 | K8 | ready (approved; allowlist to write) | coordinator | — | — | — | — | — | 2026-10-27 |
-| K10 | ready (this ledger) | coordinator | feature/hyperplonk | — | — | — | — | 2026-10-27 |
+| K10 | done | coordinator | feature/hyperplonk | 16a40bc2 | 06ca7bd6 | — | — | 2026-10-30 |
 | M−1 | todo | agent | hp/m-1-hygiene | — | — | — | — | — |
 | M0a | todo | Foundations | hp/m0a | — | — | — | — | — |
 | M0b | todo | Calculator, RustRef, PyRef | hp/m0b | — | — | — | — | — |
@@ -64,3 +64,4 @@ States: todo · ready · running · returned · in-review · merged · blocked �
 | 2026-10-30 | docs | OVERVIEW expanded | toy examples, 7 animated SVG figures, 3 Mermaid diagrams; generators in `toy/` |
 | 2026-10-30 | docs | review started | independent document review (gaps, references) on a frozen snapshot |
 | 2026-10-30 | docs | review returned | 49 findings; all accepted; D8 opened (panurus#2539 merged by vendoring) |
+| 2026-10-30 | K2, K6, K10 | done | user asked to commit and push; `feature/hyperplonk` created from `16a40bc2` and pushed: `cac2903e` (papers), `06ca7bd6` (docs) |

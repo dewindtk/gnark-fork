@@ -11,15 +11,15 @@ Companion specs (normative for implementers):
 | # | Item | Owner | Status |
 |---|---|---|---|
 | K1 | Merge fork PR #9 into `master` (D4) | user | **done 2026-10-27** (merge commit `16a40bc2`) |
-| K2 | Create the **feature branch `feature/hyperplonk`** from `master` @ `16a40bc2`; commit these docs + `PROJECT.md` on it and push (branching model §7.0) | coordinator (push needs user OK) | open |
+| K2 | Create the **feature branch `feature/hyperplonk`** from `master` @ `16a40bc2`; commit these docs + `PROJECT.md` on it and push (branching model §7.0) | coordinator | **done 2026-10-30** (`06ca7bd6`) |
 | K3 | **M−1 hygiene PR → `master`** (it fixes master itself; then merged into `feature/hyperplonk`): master is red under `go test -short ./...` today (verified 2026-10-27): `TestVersion` ("latest git tag is more recent than hardcoded Version") and `internal/stats` `TestCircuitStatistics` panics "not implemented" for PLONKFRI. Fix: `internal/stats` uses `scs.NewBuilder` for every SCS-based backend and skips backends without reference stats; `TestVersion` fixed or skipped with a recorded reason. HYPERPLONK enters `backend.Implemented()` in M1b. | coordinator → agent | open |
 | K4 | CI: **decided 2026-10-27 — gate evidence = the coordinator's local run** (full-tree check output pasted into each milestone PR), for now; Actions may be enabled later. Toolchain rule: **no APIs newer than go1.25** (go.mod 1.25.7; local Go 1.27.3); golangci-lint pinned to CI's version (2.10.1). | user | **done** |
 | K5 | Spec edits from the readiness audit (§12) | coordinator | **done 2026-10-27** |
-| K6 | Papers in `resources/`: all cited ePrint papers (incl. 2022/1355, 2022/1530, 2024/1586, 2026/391, 2026/1367, 2025/2046, 2025/2051, 2025/2055, 2025/2110) | coordinator | **files present (2026-10-30), commit at K2** |
+| K6 | Papers in `resources/`: all cited ePrint papers (incl. 2022/1355, 2022/1530, 2024/1586, 2026/391, 2026/1367, 2025/2046, 2025/2051, 2025/2055, 2025/2110) | coordinator | **done 2026-10-30** (`cac2903e`) |
 | K7 | Brief template (`briefs/TEMPLATE.md`), gate template (`gates/TEMPLATE.md`), full briefs for M0a and M1a | coordinator | template **done**, briefs open |
 | K8 | Permissions for background agents: `go build/test/vet`, `gofmt`, `golangci-lint` in worktrees; `docker build/run` for `internal/whir/testdata/rustref` (network only at image build). **Approved by the user 2026-10-27**; the coordinator writes the project allowlist at kick-off and shows it to the user | coordinator | approved, to configure |
 | K9 | Session-log entry in `PROJECT.md` | coordinator | done |
-| K10 | Execution ledger `STATUS.md` (§7.4) and `reports/`; committed with the docs at K2 | coordinator | drafted |
+| K10 | Execution ledger `STATUS.md` (§7.4) and `reports/` | coordinator | **done 2026-10-30** |
 
 ## 1. Goal
 
