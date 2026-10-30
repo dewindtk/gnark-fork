@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 300" width="700" height="300" role="img" aria-labelledby="title desc">
+<title id="title">Multilinear extension: evaluating by folding</title>
+<desc id="desc">Table T=(3,1,4,1) on the square {0,1}^2, folded at X1=2 to (5,1) and at X2=3 to 90, mod 97.</desc>
+<style>
+svg{--bg:#fcfcfb;--ink:#0b0b0b;--ink2:#52514e;--muted:#9a9993;--grid:#e4e3df;--cell:#f0efec;
+--s1:#2a78d6;--s2:#eb6834;--s3:#1baf7a;--bad:#d03b3b;--good:#0ca30c;--t1:rgba(42,120,214,.16);--t2:rgba(235,104,52,.16)}
+@media (prefers-color-scheme:dark){svg{--bg:#1a1a19;--ink:#f0efec;--ink2:#c3c2b7;--muted:#77766f;--grid:#383835;
+--cell:#262624;--s1:#3987e5;--s2:#d95926;--s3:#199e70;--bad:#e66767;--good:#0ca30c;--t1:rgba(57,135,229,.22);--t2:rgba(217,89,38,.22)}}
+text{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;font-size:13px;fill:var(--ink);
+font-variant-numeric:tabular-nums}
+.t2{fill:var(--ink2)} .sm{font-size:11.5px} .lg{font-size:15px;font-weight:600} .mono{font-family:ui-monospace,Menlo,Consolas,monospace}
+.cell{fill:var(--cell);stroke:var(--grid);stroke-width:1}
+.line{stroke:var(--muted);stroke-width:1.2;fill:none} .dash{stroke-dasharray:4 4}
+.rv,.tr{animation-iteration-count:infinite;animation-fill-mode:both;animation-timing-function:ease-in-out}
+.tr{opacity:0}
+@media (prefers-reduced-motion:reduce){svg .rv,svg .tr{animation:none!important}svg .rv{opacity:1}svg .tr{opacity:0}svg .keep{opacity:1}}
+@keyframes rv1{0%,22.5%{opacity:0}24.5%,97%{opacity:1}100%{opacity:0}}.rv1{animation-name:rv1;animation-duration:12s}@keyframes rv2{0%,45.0%{opacity:0}47.0%,97%{opacity:1}100%{opacity:0}}.rv2{animation-name:rv2;animation-duration:12s}@keyframes rv3{0%,67.5%{opacity:0}69.5%,97%{opacity:1}100%{opacity:0}}.rv3{animation-name:rv3;animation-duration:12s}</style>
+<defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker><marker id="arrA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--s1)"/></marker></defs>
+<rect width="100%" height="100%" rx="10" fill="var(--bg)"/>
+<text x="20" y="26" class="lg" text-anchor="start" >Evaluate the multilinear extension of T at (2, 3) over F₉₇, one variable at a time</text>
+<line x1="80" y1="250" x2="296.0" y2="250" class="line" marker-end="url(#arr)"/>
+<line x1="80" y1="250" x2="80" y2="57.5" class="line" marker-end="url(#arr)"/>
+<text x="302.0" y="254" class="t2" text-anchor="start" >X₁</text>
+<text x="74" y="53.5" class="t2" text-anchor="end" >X₂</text>
+<text x="80" y="280" class="t2 sm" text-anchor="middle" >0</text>
+<text x="170" y="280" class="t2 sm" text-anchor="middle" >1</text>
+<text x="260" y="280" class="t2 sm" text-anchor="middle" >2</text>
+<text x="58" y="254" class="t2 sm" text-anchor="end" >0</text>
+<text x="58" y="199" class="t2 sm" text-anchor="end" >1</text>
+<text x="58" y="144" class="t2 sm" text-anchor="end" >2</text>
+<text x="58" y="89" class="t2 sm" text-anchor="end" >3</text>
+<rect x="80" y="195" width="90" height="55" fill="none" stroke="var(--ink2)" stroke-width="1.5"/>
+<circle cx="80" cy="250" r="13" fill="var(--t1)" stroke="var(--s1)" stroke-width="2"/>
+<text x="80" y="254.5" class="" text-anchor="middle" font-weight="600">3</text>
+<circle cx="80" cy="195" r="13" fill="var(--t1)" stroke="var(--s1)" stroke-width="2"/>
+<text x="80" y="199.5" class="" text-anchor="middle" font-weight="600">1</text>
+<circle cx="170" cy="250" r="13" fill="var(--t1)" stroke="var(--s1)" stroke-width="2"/>
+<text x="170" y="254.5" class="" text-anchor="middle" font-weight="600">4</text>
+<circle cx="170" cy="195" r="13" fill="var(--t1)" stroke="var(--s1)" stroke-width="2"/>
+<text x="170" y="199.5" class="" text-anchor="middle" font-weight="600">1</text>
+<g class="rv rv1">
+<line x1="183" y1="250" x2="247" y2="250" class="line dash"/>
+<circle cx="260" cy="250" r="13" fill="var(--t2)" stroke="var(--s2)" stroke-width="2"/>
+<text x="260" y="254.5" class="" text-anchor="middle" font-weight="600">5</text>
+<line x1="183" y1="195" x2="247" y2="195" class="line dash"/>
+<circle cx="260" cy="195" r="13" fill="var(--t2)" stroke="var(--s2)" stroke-width="2"/>
+<text x="260" y="199.5" class="" text-anchor="middle" font-weight="600">1</text>
+</g>
+<g class="rv rv2"><line x1="260" y1="182" x2="260" y2="100" class="line dash"/><circle cx="260" cy="85" r="15" fill="var(--s3)" stroke="var(--s3)" stroke-width="2"/></g>
+<text x="260" y="89.5" class="rv rv2" text-anchor="middle" font-weight="700" fill="#fff" style="fill:#fff">90</text>
+<text x="330" y="70" class="" text-anchor="start" >① the table: T[x₁x₂] for rows 00, 01, 10, 11</text>
+<text x="330" y="90" class="t2 sm" text-anchor="start" >   T = (3, 1, 4, 1)  — the 4 corners of the square</text>
+<text x="330" y="125" class="rv rv1" text-anchor="start" >② fold X₁ = 2:  (1−2)·T[0x₂] + 2·T[1x₂]</text>
+<text x="342" y="145" class="t2 sm rv rv1" text-anchor="start" >x₂ = 0:  −3 + 8 = 5</text>
+<text x="500" y="145" class="t2 sm rv rv1" text-anchor="start" >x₂ = 1:  −1 + 2 = 1</text>
+<text x="330" y="180" class="rv rv2" text-anchor="start" >③ fold X₂ = 3:  (1−3)·5 + 3·1 = −7</text>
+<text x="330" y="200" class="t2 sm rv rv2" text-anchor="start" >   = 90 (mod 97)  =  value of the MLE at (2, 3)</text>
+<text x="330" y="232" class="sm rv rv3" text-anchor="start" >Same result as Σ_b T[b]·eq(b, (2,3)), in 2 + 1 steps:</text>
+<text x="330" y="250" class="t2 sm rv rv3" text-anchor="start" >this is gnark-crypto's MultiLin.Fold (X₁ = MSB first).</text>
+</svg>

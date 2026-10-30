@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 430" width="860" height="430" role="img" aria-labelledby="title desc">
+<title id="title">Sumcheck on a 3-variable table, round by round</title>
+<desc id="desc">Each round the prover sends the sums of the X=0 and X=1 halves; the verifier checks they add up to the claim, picks r and both fold the table; the last value is checked with one evaluation.</desc>
+<style>
+svg{--bg:#fcfcfb;--ink:#0b0b0b;--ink2:#52514e;--muted:#9a9993;--grid:#e4e3df;--cell:#f0efec;
+--s1:#2a78d6;--s2:#eb6834;--s3:#1baf7a;--bad:#d03b3b;--good:#0ca30c;--t1:rgba(42,120,214,.16);--t2:rgba(235,104,52,.16)}
+@media (prefers-color-scheme:dark){svg{--bg:#1a1a19;--ink:#f0efec;--ink2:#c3c2b7;--muted:#77766f;--grid:#383835;
+--cell:#262624;--s1:#3987e5;--s2:#d95926;--s3:#199e70;--bad:#e66767;--good:#0ca30c;--t1:rgba(57,135,229,.22);--t2:rgba(217,89,38,.22)}}
+text{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;font-size:13px;fill:var(--ink);
+font-variant-numeric:tabular-nums}
+.t2{fill:var(--ink2)} .sm{font-size:11.5px} .lg{font-size:15px;font-weight:600} .mono{font-family:ui-monospace,Menlo,Consolas,monospace}
+.cell{fill:var(--cell);stroke:var(--grid);stroke-width:1}
+.line{stroke:var(--muted);stroke-width:1.2;fill:none} .dash{stroke-dasharray:4 4}
+.rv,.tr{animation-iteration-count:infinite;animation-fill-mode:both;animation-timing-function:ease-in-out}
+.tr{opacity:0}
+@media (prefers-reduced-motion:reduce){svg .rv,svg .tr{animation:none!important}svg .rv{opacity:1}svg .tr{opacity:0}svg .keep{opacity:1}}
+@keyframes rv1{0%,11.2%{opacity:0}13.2%,97%{opacity:1}100%{opacity:0}}.rv1{animation-name:rv1;animation-duration:20s}@keyframes rv2{0%,22.5%{opacity:0}24.5%,97%{opacity:1}100%{opacity:0}}.rv2{animation-name:rv2;animation-duration:20s}@keyframes rv3{0%,33.8%{opacity:0}35.8%,97%{opacity:1}100%{opacity:0}}.rv3{animation-name:rv3;animation-duration:20s}@keyframes rv4{0%,45.0%{opacity:0}47.0%,97%{opacity:1}100%{opacity:0}}.rv4{animation-name:rv4;animation-duration:20s}@keyframes rv5{0%,56.2%{opacity:0}58.2%,97%{opacity:1}100%{opacity:0}}.rv5{animation-name:rv5;animation-duration:20s}@keyframes rv6{0%,67.5%{opacity:0}69.5%,97%{opacity:1}100%{opacity:0}}.rv6{animation-name:rv6;animation-duration:20s}@keyframes rv7{0%,78.8%{opacity:0}80.8%,97%{opacity:1}100%{opacity:0}}.rv7{animation-name:rv7;animation-duration:20s}</style>
+<defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker><marker id="arrA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--s1)"/></marker></defs>
+<rect width="100%" height="100%" rx="10" fill="var(--bg)"/>
+<text x="20" y="28" class="lg" text-anchor="start" >Sumcheck: prove Σ T(x) = 10 over {0,1}³  (F₉₇, toy table)</text>
+<g class="">
+<rect x="30" y="62" width="42" height="34" rx="4" fill="var(--t1)" stroke="var(--grid)"/>
+<text x="51.0" y="84" class="" text-anchor="middle" >2</text>
+<rect x="76" y="62" width="42" height="34" rx="4" fill="var(--t1)" stroke="var(--grid)"/>
+<text x="97.0" y="84" class="" text-anchor="middle" >0</text>
+<rect x="122" y="62" width="42" height="34" rx="4" fill="var(--t1)" stroke="var(--grid)"/>
+<text x="143.0" y="84" class="" text-anchor="middle" >1</text>
+<rect x="168" y="62" width="42" height="34" rx="4" fill="var(--t1)" stroke="var(--grid)"/>
+<text x="189.0" y="84" class="" text-anchor="middle" >3</text>
+<rect x="214" y="62" width="42" height="34" rx="4" fill="var(--t2)" stroke="var(--grid)"/>
+<text x="235.0" y="84" class="" text-anchor="middle" >1</text>
+<rect x="260" y="62" width="42" height="34" rx="4" fill="var(--t2)" stroke="var(--grid)"/>
+<text x="281.0" y="84" class="" text-anchor="middle" >1</text>
+<rect x="306" y="62" width="42" height="34" rx="4" fill="var(--t2)" stroke="var(--grid)"/>
+<text x="327.0" y="84" class="" text-anchor="middle" >0</text>
+<rect x="352" y="62" width="42" height="34" rx="4" fill="var(--t2)" stroke="var(--grid)"/>
+<text x="373.0" y="84" class="" text-anchor="middle" >2</text>
+<text x="120.0" y="56" class="t2 sm" text-anchor="middle" >X₁ = 0</text>
+<text x="304.0" y="56" class="t2 sm" text-anchor="middle" >X₁ = 1</text>
+<text x="416" y="84" class="" text-anchor="start" >claim = 10</text>
+</g>
+<text x="416" y="118" class="t2 sm rv rv1" text-anchor="start" >prover sends s(0) = 6, s(1) = 4;  verifier: 6 + 4 = 10 ✓</text>
+<text x="416" y="135" class="t2 sm rv rv1" text-anchor="start" >verifier picks r = 5;  fold: (1−r)·left + r·right</text>
+<g class="rv rv1">
+<line x1="51.0" y1="97" x2="51.0" y2="152" class="line" stroke-opacity=".55"/>
+<line x1="235.0" y1="97" x2="51.0" y2="152" class="line" stroke-opacity=".55"/>
+<line x1="97.0" y1="97" x2="97.0" y2="152" class="line" stroke-opacity=".55"/>
+<line x1="281.0" y1="97" x2="97.0" y2="152" class="line" stroke-opacity=".55"/>
+<line x1="143.0" y1="97" x2="143.0" y2="152" class="line" stroke-opacity=".55"/>
+<line x1="327.0" y1="97" x2="143.0" y2="152" class="line" stroke-opacity=".55"/>
+<line x1="189.0" y1="97" x2="189.0" y2="152" class="line" stroke-opacity=".55"/>
+<line x1="373.0" y1="97" x2="189.0" y2="152" class="line" stroke-opacity=".55"/>
+</g>
+<g class="rv rv2">
+<rect x="30" y="154" width="42" height="34" rx="4" fill="var(--t1)" stroke="var(--grid)"/>
+<text x="51.0" y="176" class="" text-anchor="middle" >94</text>
+<rect x="76" y="154" width="42" height="34" rx="4" fill="var(--t1)" stroke="var(--grid)"/>
+<text x="97.0" y="176" class="" text-anchor="middle" >5</text>
+<rect x="122" y="154" width="42" height="34" rx="4" fill="var(--t2)" stroke="var(--grid)"/>
+<text x="143.0" y="176" class="" text-anchor="middle" >93</text>
+<rect x="168" y="154" width="42" height="34" rx="4" fill="var(--t2)" stroke="var(--grid)"/>
+<text x="189.0" y="176" class="" text-anchor="middle" >95</text>
+<text x="74.0" y="148" class="t2 sm" text-anchor="middle" >X₂ = 0</text>
+<text x="166.0" y="148" class="t2 sm" text-anchor="middle" >X₂ = 1</text>
+<text x="416" y="176" class="" text-anchor="start" >new claim s₁(r₁) = 93</text>
+</g>
+<text x="416" y="210" class="t2 sm rv rv3" text-anchor="start" >prover sends s(0) = 2, s(1) = 91;  verifier: 2 + 91 = 93 ✓</text>
+<text x="416" y="227" class="t2 sm rv rv3" text-anchor="start" >verifier picks r = 7;  fold: (1−r)·left + r·right</text>
+<g class="rv rv3">
+<line x1="51.0" y1="189" x2="51.0" y2="244" class="line" stroke-opacity=".55"/>
+<line x1="143.0" y1="189" x2="51.0" y2="244" class="line" stroke-opacity=".55"/>
+<line x1="97.0" y1="189" x2="97.0" y2="244" class="line" stroke-opacity=".55"/>
+<line x1="189.0" y1="189" x2="97.0" y2="244" class="line" stroke-opacity=".55"/>
+</g>
+<g class="rv rv4">
+<rect x="30" y="246" width="42" height="34" rx="4" fill="var(--t1)" stroke="var(--grid)"/>
+<text x="51.0" y="268" class="" text-anchor="middle" >87</text>
+<rect x="76" y="246" width="42" height="34" rx="4" fill="var(--t2)" stroke="var(--grid)"/>
+<text x="97.0" y="268" class="" text-anchor="middle" >53</text>
+<text x="51.0" y="240" class="t2 sm" text-anchor="middle" >X₃ = 0</text>
+<text x="97.0" y="240" class="t2 sm" text-anchor="middle" >X₃ = 1</text>
+<text x="416" y="268" class="" text-anchor="start" >new claim s₂(r₂) = 43</text>
+</g>
+<text x="416" y="302" class="t2 sm rv rv5" text-anchor="start" >prover sends s(0) = 87, s(1) = 53;  verifier: 87 + 53 = 43 ✓</text>
+<text x="416" y="319" class="t2 sm rv rv5" text-anchor="start" >verifier picks r = 2;  fold: (1−r)·left + r·right</text>
+<g class="rv rv5">
+<line x1="51.0" y1="281" x2="51.0" y2="336" class="line" stroke-opacity=".55"/>
+<line x1="97.0" y1="281" x2="51.0" y2="336" class="line" stroke-opacity=".55"/>
+</g>
+<g class="rv rv6">
+<rect x="30" y="338" width="42" height="34" rx="4" fill="var(--cell)" stroke="var(--grid)"/>
+<text x="51.0" y="360" class="" text-anchor="middle" >19</text>
+<text x="416" y="360" class="" text-anchor="start" >new claim s₃(r₃) = 19</text>
+</g>
+<text x="30" y="398" class="sm rv rv7" text-anchor="start" >End: the verifier needs one value, T̃(5, 7, 2) = 19 — it equals the last claim ✓. In HyperPlonk this value comes from a PCS opening.</text>
+<text x="30" y="418" class="t2 sm rv rv7" text-anchor="start" >Cost: the prover's table halves every round (8 → 4 → 2 → 1); the verifier does O(1) work per round.</text>
+</svg>

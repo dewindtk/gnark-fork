@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 360" width="860" height="360" role="img" aria-labelledby="title desc">
+<title id="title">WHIR's interleaved Reed-Solomon encoding and leaf folding</title>
+<desc id="desc">Table v=(3,1,4,1) split into two chunks, each encoded on L; a Merkle leaf is one column; folding a leaf with alpha=5 gives the encoding of the folded table at that point.</desc>
+<style>
+svg{--bg:#fcfcfb;--ink:#0b0b0b;--ink2:#52514e;--muted:#9a9993;--grid:#e4e3df;--cell:#f0efec;
+--s1:#2a78d6;--s2:#eb6834;--s3:#1baf7a;--bad:#d03b3b;--good:#0ca30c;--t1:rgba(42,120,214,.16);--t2:rgba(235,104,52,.16)}
+@media (prefers-color-scheme:dark){svg{--bg:#1a1a19;--ink:#f0efec;--ink2:#c3c2b7;--muted:#77766f;--grid:#383835;
+--cell:#262624;--s1:#3987e5;--s2:#d95926;--s3:#199e70;--bad:#e66767;--good:#0ca30c;--t1:rgba(57,135,229,.22);--t2:rgba(217,89,38,.22)}}
+text{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;font-size:13px;fill:var(--ink);
+font-variant-numeric:tabular-nums}
+.t2{fill:var(--ink2)} .sm{font-size:11.5px} .lg{font-size:15px;font-weight:600} .mono{font-family:ui-monospace,Menlo,Consolas,monospace}
+.cell{fill:var(--cell);stroke:var(--grid);stroke-width:1}
+.line{stroke:var(--muted);stroke-width:1.2;fill:none} .dash{stroke-dasharray:4 4}
+.rv,.tr{animation-iteration-count:infinite;animation-fill-mode:both;animation-timing-function:ease-in-out}
+.tr{opacity:0}
+@media (prefers-reduced-motion:reduce){svg .rv,svg .tr{animation:none!important}svg .rv{opacity:1}svg .tr{opacity:0}svg .keep{opacity:1}}
+@keyframes rv1{0%,22.5%{opacity:0}24.5%,97%{opacity:1}100%{opacity:0}}.rv1{animation-name:rv1;animation-duration:14s}@keyframes rv2{0%,45.0%{opacity:0}47.0%,97%{opacity:1}100%{opacity:0}}.rv2{animation-name:rv2;animation-duration:14s}@keyframes rv3{0%,67.5%{opacity:0}69.5%,97%{opacity:1}100%{opacity:0}}.rv3{animation-name:rv3;animation-duration:14s}</style>
+<defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker><marker id="arrA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--s1)"/></marker></defs>
+<rect width="100%" height="100%" rx="10" fill="var(--bg)"/>
+<text x="20" y="28" class="lg" text-anchor="start" >WHIR encoding (toy: m = 2, k = 1, F₁₇):  table → chunks → codewords → Merkle leaves</text>
+<text x="20" y="66" class="" text-anchor="start" >table v = (3, 1, 4, 1)  →  chunk₀ = (3, 1) ↦ ĉ₀(X) = 3 + X,   chunk₁ = (4, 1) ↦ ĉ₁(X) = 4 + X</text>
+<g class="rv rv1">
+<text x="20" y="134" class="t2" text-anchor="start" >ĉ₀ on L</text>
+<text x="20" y="180" class="t2" text-anchor="start" >ĉ₁ on L</text>
+<text x="184" y="102" class="t2 sm" text-anchor="middle" >x = 1</text>
+<rect x="150" y="110" width="68" height="38" rx="5" class="cell"/>
+<text x="184" y="134" class="" text-anchor="middle" >4</text>
+<rect x="150" y="156" width="68" height="38" rx="5" class="cell"/>
+<text x="184" y="180" class="" text-anchor="middle" >5</text>
+<text x="258" y="102" class="t2 sm" text-anchor="middle" >x = 2</text>
+<rect x="224" y="110" width="68" height="38" rx="5" class="cell"/>
+<text x="258" y="134" class="" text-anchor="middle" >5</text>
+<rect x="224" y="156" width="68" height="38" rx="5" class="cell"/>
+<text x="258" y="180" class="" text-anchor="middle" >6</text>
+<text x="332" y="102" class="t2 sm" text-anchor="middle" >x = 4</text>
+<rect x="298" y="110" width="68" height="38" rx="5" class="cell"/>
+<text x="332" y="134" class="" text-anchor="middle" >7</text>
+<rect x="298" y="156" width="68" height="38" rx="5" class="cell"/>
+<text x="332" y="180" class="" text-anchor="middle" >8</text>
+<text x="406" y="102" class="t2 sm" text-anchor="middle" >x = 8</text>
+<rect x="372" y="110" width="68" height="38" rx="5" class="cell"/>
+<text x="406" y="134" class="" text-anchor="middle" >11</text>
+<rect x="372" y="156" width="68" height="38" rx="5" class="cell"/>
+<text x="406" y="180" class="" text-anchor="middle" >12</text>
+<text x="480" y="102" class="t2 sm" text-anchor="middle" >x = 16</text>
+<rect x="446" y="110" width="68" height="38" rx="5" class="cell"/>
+<text x="480" y="134" class="" text-anchor="middle" >2</text>
+<rect x="446" y="156" width="68" height="38" rx="5" class="cell"/>
+<text x="480" y="180" class="" text-anchor="middle" >3</text>
+<text x="554" y="102" class="t2 sm" text-anchor="middle" >x = 15</text>
+<rect x="520" y="110" width="68" height="38" rx="5" class="cell"/>
+<text x="554" y="134" class="" text-anchor="middle" >1</text>
+<rect x="520" y="156" width="68" height="38" rx="5" class="cell"/>
+<text x="554" y="180" class="" text-anchor="middle" >2</text>
+<text x="628" y="102" class="t2 sm" text-anchor="middle" >x = 13</text>
+<rect x="594" y="110" width="68" height="38" rx="5" class="cell"/>
+<text x="628" y="134" class="" text-anchor="middle" >16</text>
+<rect x="594" y="156" width="68" height="38" rx="5" class="cell"/>
+<text x="628" y="180" class="" text-anchor="middle" >0</text>
+<text x="702" y="102" class="t2 sm" text-anchor="middle" >x = 9</text>
+<rect x="668" y="110" width="68" height="38" rx="5" class="cell"/>
+<text x="702" y="134" class="" text-anchor="middle" >12</text>
+<rect x="668" y="156" width="68" height="38" rx="5" class="cell"/>
+<text x="702" y="180" class="" text-anchor="middle" >13</text>
+</g>
+<g class="rv rv2"><rect x="294" y="106" width="76" height="92" rx="8" fill="none" stroke="var(--s1)" stroke-width="2.5"/></g>
+<text x="332" y="218" class="sm rv rv2" text-anchor="middle" style="fill:var(--ink)">one Merkle leaf</text>
+<text x="150" y="250" class="t2 sm rv rv2" text-anchor="start" >A leaf holds every chunk at the same x. The verifier opens leaf x = 4: (7, 8).</text>
+<text x="150" y="285" class="sm rv rv3" text-anchor="start" font-weight="600">Fold with α = 5:  (1−α)·7 + α·8 = 12 (mod 17)</text>
+<text x="150" y="305" class="t2 sm rv rv3" text-anchor="start" >Check: the folded table P(α, ·) = (8, 1) encodes to 8 + 1·x = 12 at x = 4  ✓ — so one leaf lets the verifier fold by itself.</text>
+<text x="150" y="325" class="t2 sm rv rv3" text-anchor="start" >Real parameters: k = 4 (16 chunks per leaf), ρ = 1/8, |L₀| = 2^(m−4)·8.</text>
+</svg>

@@ -1,0 +1,121 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 420" width="900" height="420" role="img" aria-labelledby="title desc">
+<title id="title">Toy circuit x² + x + 5 = out as a HyperPlonk table with its copy cycles</title>
+<desc id="desc">Four rows: public placeholder, x*x=v1, v1+x=v2, v2+5=out. The permutation sigma links every cell holding the same variable into a cycle; the animation highlights the cycles of out, x, v1 and v2 in turn.</desc>
+<style>
+svg{--bg:#fcfcfb;--ink:#0b0b0b;--ink2:#52514e;--muted:#9a9993;--grid:#e4e3df;--cell:#f0efec;
+--s1:#2a78d6;--s2:#eb6834;--s3:#1baf7a;--bad:#d03b3b;--good:#0ca30c;--t1:rgba(42,120,214,.16);--t2:rgba(235,104,52,.16)}
+@media (prefers-color-scheme:dark){svg{--bg:#1a1a19;--ink:#f0efec;--ink2:#c3c2b7;--muted:#77766f;--grid:#383835;
+--cell:#262624;--s1:#3987e5;--s2:#d95926;--s3:#199e70;--bad:#e66767;--good:#0ca30c;--t1:rgba(57,135,229,.22);--t2:rgba(217,89,38,.22)}}
+text{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;font-size:13px;fill:var(--ink);
+font-variant-numeric:tabular-nums}
+.t2{fill:var(--ink2)} .sm{font-size:11.5px} .lg{font-size:15px;font-weight:600} .mono{font-family:ui-monospace,Menlo,Consolas,monospace}
+.cell{fill:var(--cell);stroke:var(--grid);stroke-width:1}
+.line{stroke:var(--muted);stroke-width:1.2;fill:none} .dash{stroke-dasharray:4 4}
+.rv,.tr{animation-iteration-count:infinite;animation-fill-mode:both;animation-timing-function:ease-in-out}
+.tr{opacity:0}
+@media (prefers-reduced-motion:reduce){svg .rv,svg .tr{animation:none!important}svg .rv{opacity:1}svg .tr{opacity:0}svg .keep{opacity:1}}
+@keyframes tr0_1{0%,0.0%{opacity:0}1.5%,16.5%{opacity:1}18.0%,100%{opacity:0}}.tr0_1{animation-name:tr0_1;animation-duration:16s}@keyframes tr1_1{0%,18.0%{opacity:0}19.5%,34.5%{opacity:1}36.0%,100%{opacity:0}}.tr1_1{animation-name:tr1_1;animation-duration:16s}@keyframes tr2_1{0%,36.0%{opacity:0}37.5%,52.5%{opacity:1}54.0%,100%{opacity:0}}.tr2_1{animation-name:tr2_1;animation-duration:16s}@keyframes tr3_1{0%,54.0%{opacity:0}55.5%,70.5%{opacity:1}72.0%,100%{opacity:0}}.tr3_1{animation-name:tr3_1;animation-duration:16s}@keyframes rv4{0%,72.0%{opacity:0}74.0%,97%{opacity:1}100%{opacity:0}}.rv4{animation-name:rv4;animation-duration:16s}</style>
+<defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker><marker id="arrA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--s1)"/></marker></defs>
+<rect width="100%" height="100%" rx="10" fill="var(--bg)"/>
+<text x="20" y="28" class="lg" text-anchor="start" >Toy circuit  x² + x + 5 = out  with x = 3 (secret), out = 17 (public), over F₉₇</text>
+<text x="30" y="58" class="t2 sm" text-anchor="start" >row</text>
+<text x="80" y="58" class="t2 sm" text-anchor="start" >q_L</text>
+<text x="125" y="58" class="t2 sm" text-anchor="start" >q_R</text>
+<text x="170" y="58" class="t2 sm" text-anchor="start" >q_O</text>
+<text x="215" y="58" class="t2 sm" text-anchor="start" >q_M</text>
+<text x="260" y="58" class="t2 sm" text-anchor="start" >q_C</text>
+<text x="320" y="58" class="t2 sm" text-anchor="start" >w₀ (L)</text>
+<text x="410" y="58" class="t2 sm" text-anchor="start" >w₁ (R)</text>
+<text x="500" y="58" class="t2 sm" text-anchor="start" >w₂ (O)</text>
+<text x="600" y="58" class="t2 sm" text-anchor="start" >constraint</text>
+<text x="38" y="96" class="t2" text-anchor="start" >0</text>
+<text x="90" y="96" class="" text-anchor="middle" >−1</text>
+<text x="135" y="96" class="" text-anchor="middle" >0</text>
+<text x="180" y="96" class="" text-anchor="middle" >0</text>
+<text x="225" y="96" class="" text-anchor="middle" >0</text>
+<text x="270" y="96" class="" text-anchor="middle" >0</text>
+<rect x="320" y="74" width="78" height="38" rx="5" class="cell"/>
+<text x="359" y="91" class="" text-anchor="middle" font-weight="600">17</text>
+<text x="359" y="106" class="t2 sm" text-anchor="middle" >out</text>
+<rect x="410" y="74" width="78" height="38" rx="5" class="cell"/>
+<text x="449" y="91" class="" text-anchor="middle" font-weight="600">17</text>
+<text x="449" y="106" class="t2 sm" text-anchor="middle" >out</text>
+<rect x="500" y="74" width="78" height="38" rx="5" class="cell"/>
+<text x="539" y="91" class="" text-anchor="middle" font-weight="600">17</text>
+<text x="539" y="106" class="t2 sm" text-anchor="middle" >out</text>
+<text x="600" y="96" class="t2 sm" text-anchor="start" >public: −w₀ + pub₀ = 0</text>
+<text x="38" y="148" class="t2" text-anchor="start" >1</text>
+<text x="90" y="148" class="" text-anchor="middle" >0</text>
+<text x="135" y="148" class="" text-anchor="middle" >0</text>
+<text x="180" y="148" class="" text-anchor="middle" >−1</text>
+<text x="225" y="148" class="" text-anchor="middle" >1</text>
+<text x="270" y="148" class="" text-anchor="middle" >0</text>
+<rect x="320" y="126" width="78" height="38" rx="5" class="cell"/>
+<text x="359" y="143" class="" text-anchor="middle" font-weight="600">3</text>
+<text x="359" y="158" class="t2 sm" text-anchor="middle" >x</text>
+<rect x="410" y="126" width="78" height="38" rx="5" class="cell"/>
+<text x="449" y="143" class="" text-anchor="middle" font-weight="600">3</text>
+<text x="449" y="158" class="t2 sm" text-anchor="middle" >x</text>
+<rect x="500" y="126" width="78" height="38" rx="5" class="cell"/>
+<text x="539" y="143" class="" text-anchor="middle" font-weight="600">9</text>
+<text x="539" y="158" class="t2 sm" text-anchor="middle" >v₁</text>
+<text x="600" y="148" class="t2 sm" text-anchor="start" >x·x − v₁ = 0</text>
+<text x="38" y="200" class="t2" text-anchor="start" >2</text>
+<text x="90" y="200" class="" text-anchor="middle" >1</text>
+<text x="135" y="200" class="" text-anchor="middle" >1</text>
+<text x="180" y="200" class="" text-anchor="middle" >−1</text>
+<text x="225" y="200" class="" text-anchor="middle" >0</text>
+<text x="270" y="200" class="" text-anchor="middle" >0</text>
+<rect x="320" y="178" width="78" height="38" rx="5" class="cell"/>
+<text x="359" y="195" class="" text-anchor="middle" font-weight="600">9</text>
+<text x="359" y="210" class="t2 sm" text-anchor="middle" >v₁</text>
+<rect x="410" y="178" width="78" height="38" rx="5" class="cell"/>
+<text x="449" y="195" class="" text-anchor="middle" font-weight="600">3</text>
+<text x="449" y="210" class="t2 sm" text-anchor="middle" >x</text>
+<rect x="500" y="178" width="78" height="38" rx="5" class="cell"/>
+<text x="539" y="195" class="" text-anchor="middle" font-weight="600">12</text>
+<text x="539" y="210" class="t2 sm" text-anchor="middle" >v₂</text>
+<text x="600" y="200" class="t2 sm" text-anchor="start" >v₁ + x − v₂ = 0</text>
+<text x="38" y="252" class="t2" text-anchor="start" >3</text>
+<text x="90" y="252" class="" text-anchor="middle" >1</text>
+<text x="135" y="252" class="" text-anchor="middle" >−1</text>
+<text x="180" y="252" class="" text-anchor="middle" >0</text>
+<text x="225" y="252" class="" text-anchor="middle" >0</text>
+<text x="270" y="252" class="" text-anchor="middle" >5</text>
+<rect x="320" y="230" width="78" height="38" rx="5" class="cell"/>
+<text x="359" y="247" class="" text-anchor="middle" font-weight="600">12</text>
+<text x="359" y="262" class="t2 sm" text-anchor="middle" >v₂</text>
+<rect x="410" y="230" width="78" height="38" rx="5" class="cell"/>
+<text x="449" y="247" class="" text-anchor="middle" font-weight="600">17</text>
+<text x="449" y="262" class="t2 sm" text-anchor="middle" >out</text>
+<rect x="500" y="230" width="78" height="38" rx="5" class="cell"/>
+<text x="539" y="247" class="" text-anchor="middle" font-weight="600">17</text>
+<text x="539" y="262" class="t2 sm" text-anchor="middle" >out</text>
+<text x="600" y="252" class="t2 sm" text-anchor="start" >v₂ − out + 5 = 0</text>
+<g class="tr tr0_1">
+<path d="M359,93 Q422.0,70.5 449,93" fill="none" stroke="var(--s1)" stroke-width="2.2" marker-end="url(#arrA)" stroke-opacity=".9"/>
+<path d="M449,93 Q512.0,70.5 539,93" fill="none" stroke="var(--s1)" stroke-width="2.2" marker-end="url(#arrA)" stroke-opacity=".9"/>
+<path d="M539,93 Q551.0,193.5 449,249" fill="none" stroke="var(--s1)" stroke-width="2.2" marker-end="url(#arrA)" stroke-opacity=".9"/>
+<path d="M449,249 Q512.0,226.5 539,249" fill="none" stroke="var(--s1)" stroke-width="2.2" marker-end="url(#arrA)" stroke-opacity=".9"/>
+<path d="M539,249 Q428.0,216.0 359,93" fill="none" stroke="var(--s1)" stroke-width="2.2" marker-end="url(#arrA)" stroke-opacity=".9"/>
+<text x="30" y="308" class="" text-anchor="start" style="fill:var(--ink)">σ-cycle of out (wire 0):  (w0,0) → (w1,0) → (w2,0) → (w1,3) → (w2,3) → (w0,0)</text>
+</g>
+<g class="tr tr1_1 keep">
+<path d="M359,145 Q422.0,122.5 449,145" fill="none" stroke="var(--s1)" stroke-width="2.2" marker-end="url(#arrA)" stroke-opacity=".9"/>
+<path d="M449,145 Q480.0,171.0 449,197" fill="none" stroke="var(--s1)" stroke-width="2.2" marker-end="url(#arrA)" stroke-opacity=".9"/>
+<path d="M449,197 Q409.0,193.5 359,145" fill="none" stroke="var(--s1)" stroke-width="2.2" marker-end="url(#arrA)" stroke-opacity=".9"/>
+<text x="30" y="308" class="" text-anchor="start" style="fill:var(--ink)">σ-cycle of x:  (w0,1) → (w1,1) → (w1,2) → (w0,1)</text>
+</g>
+<g class="tr tr2_1">
+<path d="M539,145 Q480.0,216.0 359,197" fill="none" stroke="var(--s1)" stroke-width="2.2" marker-end="url(#arrA)" stroke-opacity=".9"/>
+<path d="M359,197 Q454.0,126.0 539,145" fill="none" stroke="var(--s1)" stroke-width="2.2" marker-end="url(#arrA)" stroke-opacity=".9"/>
+<text x="30" y="308" class="" text-anchor="start" style="fill:var(--ink)">σ-cycle of v₁:  (w2,1) → (w0,2) → (w2,1)</text>
+</g>
+<g class="tr tr3_1">
+<path d="M539,197 Q480.0,268.0 359,249" fill="none" stroke="var(--s1)" stroke-width="2.2" marker-end="url(#arrA)" stroke-opacity=".9"/>
+<path d="M359,249 Q454.0,178.0 539,197" fill="none" stroke="var(--s1)" stroke-width="2.2" marker-end="url(#arrA)" stroke-opacity=".9"/>
+<text x="30" y="308" class="" text-anchor="start" style="fill:var(--ink)">σ-cycle of v₂:  (w2,2) → (w0,3) → (w2,2)</text>
+</g>
+<text x="30" y="336" class="t2 sm rv rv4" text-anchor="start" >Copy constraint = "w is constant along every σ-cycle". Position (column j, row i) has label id = j·n + i; σ maps it to the next position of the same variable.</text>
+<text x="30" y="354" class="t2 sm rv rv4" text-anchor="start" >Unused R/O cells hold wire 0 (= the first public variable, here out) — gnark's padding convention — so they join out's cycle.</text>
+</svg>

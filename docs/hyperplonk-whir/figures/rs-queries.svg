@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 350" width="820" height="350" role="img" aria-labelledby="title desc">
+<title id="title">Reed-Solomon codeword vs a corrupted word, and random spot checks</title>
+<desc id="desc">f(X)=3+2X evaluated on the 8-element subgroup &lt;2&gt; of F17 (rate 1/4); a word differing in 3 positions; queries land on random positions and catch the cheater when they hit a corrupted one.</desc>
+<style>
+svg{--bg:#fcfcfb;--ink:#0b0b0b;--ink2:#52514e;--muted:#9a9993;--grid:#e4e3df;--cell:#f0efec;
+--s1:#2a78d6;--s2:#eb6834;--s3:#1baf7a;--bad:#d03b3b;--good:#0ca30c;--t1:rgba(42,120,214,.16);--t2:rgba(235,104,52,.16)}
+@media (prefers-color-scheme:dark){svg{--bg:#1a1a19;--ink:#f0efec;--ink2:#c3c2b7;--muted:#77766f;--grid:#383835;
+--cell:#262624;--s1:#3987e5;--s2:#d95926;--s3:#199e70;--bad:#e66767;--good:#0ca30c;--t1:rgba(57,135,229,.22);--t2:rgba(217,89,38,.22)}}
+text{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;font-size:13px;fill:var(--ink);
+font-variant-numeric:tabular-nums}
+.t2{fill:var(--ink2)} .sm{font-size:11.5px} .lg{font-size:15px;font-weight:600} .mono{font-family:ui-monospace,Menlo,Consolas,monospace}
+.cell{fill:var(--cell);stroke:var(--grid);stroke-width:1}
+.line{stroke:var(--muted);stroke-width:1.2;fill:none} .dash{stroke-dasharray:4 4}
+.rv,.tr{animation-iteration-count:infinite;animation-fill-mode:both;animation-timing-function:ease-in-out}
+.tr{opacity:0}
+@media (prefers-reduced-motion:reduce){svg .rv,svg .tr{animation:none!important}svg .rv{opacity:1}svg .tr{opacity:0}svg .keep{opacity:1}}
+@keyframes tr0_1{0%,0.0%{opacity:0}1.5%,11.4%{opacity:1}12.9%,100%{opacity:0}}.tr0_1{animation-name:tr0_1;animation-duration:14s}@keyframes tr1_1{0%,12.9%{opacity:0}14.4%,24.2%{opacity:1}25.7%,100%{opacity:0}}.tr1_1{animation-name:tr1_1;animation-duration:14s}@keyframes tr2_1{0%,25.7%{opacity:0}27.2%,37.1%{opacity:1}38.6%,100%{opacity:0}}.tr2_1{animation-name:tr2_1;animation-duration:14s}@keyframes tr3_1{0%,38.6%{opacity:0}40.1%,49.9%{opacity:1}51.4%,100%{opacity:0}}.tr3_1{animation-name:tr3_1;animation-duration:14s}@keyframes tr4_1{0%,51.4%{opacity:0}52.9%,62.8%{opacity:1}64.3%,100%{opacity:0}}.tr4_1{animation-name:tr4_1;animation-duration:14s}@keyframes tr5_1{0%,64.3%{opacity:0}65.8%,75.6%{opacity:1}77.1%,100%{opacity:0}}.tr5_1{animation-name:tr5_1;animation-duration:14s}@keyframes rv6{0%,77.1%{opacity:0}79.1%,97%{opacity:1}100%{opacity:0}}.rv6{animation-name:rv6;animation-duration:14s}</style>
+<defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker><marker id="arrA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--s1)"/></marker></defs>
+<rect width="100%" height="100%" rx="10" fill="var(--bg)"/>
+<text x="20" y="28" class="lg" text-anchor="start" >Reed–Solomon: f(X) = 3 + 2X on L = ⟨2⟩ ⊂ F₁₇  (8 points, degree &lt; 2, rate ρ = 2/8)</text>
+<text x="20" y="94" class="t2" text-anchor="start" >codeword f(L)</text>
+<text x="20" y="174" class="t2" text-anchor="start" >committed word</text>
+<text x="182" y="60" class="t2 sm" text-anchor="middle" >x = 1</text>
+<rect x="150" y="70" width="64" height="38" rx="5" class="cell"/>
+<text x="182" y="94" class="" text-anchor="middle" >5</text>
+<rect x="150" y="150" width="64" height="38" rx="5" class="cell" style="stroke:var(--grid);stroke-width:1"/>
+<text x="182" y="174" class="" text-anchor="middle" >5</text>
+<text x="252" y="60" class="t2 sm" text-anchor="middle" >x = 2</text>
+<rect x="220" y="70" width="64" height="38" rx="5" class="cell"/>
+<text x="252" y="94" class="" text-anchor="middle" >7</text>
+<rect x="220" y="150" width="64" height="38" rx="5" class="cell" style="stroke:var(--bad);stroke-width:2"/>
+<text x="252" y="174" class="" text-anchor="middle" >0  ✗</text>
+<text x="322" y="60" class="t2 sm" text-anchor="middle" >x = 4</text>
+<rect x="290" y="70" width="64" height="38" rx="5" class="cell"/>
+<text x="322" y="94" class="" text-anchor="middle" >11</text>
+<rect x="290" y="150" width="64" height="38" rx="5" class="cell" style="stroke:var(--grid);stroke-width:1"/>
+<text x="322" y="174" class="" text-anchor="middle" >11</text>
+<text x="392" y="60" class="t2 sm" text-anchor="middle" >x = 8</text>
+<rect x="360" y="70" width="64" height="38" rx="5" class="cell"/>
+<text x="392" y="94" class="" text-anchor="middle" >2</text>
+<rect x="360" y="150" width="64" height="38" rx="5" class="cell" style="stroke:var(--grid);stroke-width:1"/>
+<text x="392" y="174" class="" text-anchor="middle" >2</text>
+<text x="462" y="60" class="t2 sm" text-anchor="middle" >x = 16</text>
+<rect x="430" y="70" width="64" height="38" rx="5" class="cell"/>
+<text x="462" y="94" class="" text-anchor="middle" >1</text>
+<rect x="430" y="150" width="64" height="38" rx="5" class="cell" style="stroke:var(--bad);stroke-width:2"/>
+<text x="462" y="174" class="" text-anchor="middle" >0  ✗</text>
+<text x="532" y="60" class="t2 sm" text-anchor="middle" >x = 15</text>
+<rect x="500" y="70" width="64" height="38" rx="5" class="cell"/>
+<text x="532" y="94" class="" text-anchor="middle" >16</text>
+<rect x="500" y="150" width="64" height="38" rx="5" class="cell" style="stroke:var(--grid);stroke-width:1"/>
+<text x="532" y="174" class="" text-anchor="middle" >16</text>
+<text x="602" y="60" class="t2 sm" text-anchor="middle" >x = 13</text>
+<rect x="570" y="70" width="64" height="38" rx="5" class="cell"/>
+<text x="602" y="94" class="" text-anchor="middle" >12</text>
+<rect x="570" y="150" width="64" height="38" rx="5" class="cell" style="stroke:var(--bad);stroke-width:2"/>
+<text x="602" y="174" class="" text-anchor="middle" >0  ✗</text>
+<text x="672" y="60" class="t2 sm" text-anchor="middle" >x = 9</text>
+<rect x="640" y="70" width="64" height="38" rx="5" class="cell"/>
+<text x="672" y="94" class="" text-anchor="middle" >4</text>
+<rect x="640" y="150" width="64" height="38" rx="5" class="cell" style="stroke:var(--grid);stroke-width:1"/>
+<text x="672" y="174" class="" text-anchor="middle" >4</text>
+<text x="150" y="210" class="t2 sm" text-anchor="start" >3 of 8 positions differ (✗). Two distinct codewords differ in ≥ 1 − ρ = 75 % of positions,</text>
+<text x="150" y="226" class="t2 sm" text-anchor="start" >so the word is far from every codeword — a few random spot checks expose it.</text>
+<g class="tr tr0_1"><path d="M313,262 L331,262 L322,246 z" fill="var(--s1)"/><rect x="287" y="67" width="70" height="124" rx="7" fill="none" stroke="var(--s1)" stroke-width="2.5"/>
+<text x="322" y="280" class="sm" text-anchor="middle" font-weight="600">query 1: x = 4 → ✓ agrees</text>
+</g>
+<g class="tr tr1_1"><path d="M593,262 L611,262 L602,246 z" fill="var(--s1)"/><rect x="567" y="67" width="70" height="124" rx="7" fill="none" stroke="var(--s1)" stroke-width="2.5"/>
+<text x="602" y="280" class="sm" text-anchor="middle" font-weight="600">query 2: x = 13 → ✗ mismatch — rejected</text>
+</g>
+<g class="tr tr2_1"><path d="M173,262 L191,262 L182,246 z" fill="var(--s1)"/><rect x="147" y="67" width="70" height="124" rx="7" fill="none" stroke="var(--s1)" stroke-width="2.5"/>
+<text x="182" y="280" class="sm" text-anchor="middle" font-weight="600">query 3: x = 1 → ✓ agrees</text>
+</g>
+<g class="tr tr3_1"><path d="M523,262 L541,262 L532,246 z" fill="var(--s1)"/><rect x="497" y="67" width="70" height="124" rx="7" fill="none" stroke="var(--s1)" stroke-width="2.5"/>
+<text x="532" y="280" class="sm" text-anchor="middle" font-weight="600">query 4: x = 15 → ✓ agrees</text>
+</g>
+<g class="tr tr4_1"><path d="M243,262 L261,262 L252,246 z" fill="var(--s1)"/><rect x="217" y="67" width="70" height="124" rx="7" fill="none" stroke="var(--s1)" stroke-width="2.5"/>
+<text x="252" y="280" class="sm" text-anchor="middle" font-weight="600">query 5: x = 2 → ✗ mismatch — rejected</text>
+</g>
+<g class="tr tr5_1"><path d="M663,262 L681,262 L672,246 z" fill="var(--s1)"/><rect x="637" y="67" width="70" height="124" rx="7" fill="none" stroke="var(--s1)" stroke-width="2.5"/>
+<text x="672" y="280" class="sm" text-anchor="middle" font-weight="600">query 6: x = 9 → ✓ agrees</text>
+</g>
+<text x="150" y="306" class="sm rv rv6" text-anchor="start" >Each query misses every ✗ with probability 5/8; t queries all miss with (5/8)ᵗ:</text>
+<text x="150" y="324" class="t2 sm rv rv6" text-anchor="start" >15 queries → below 2⁻¹⁰. WHIR's query counts come from the same rule (§6.4).</text>
+</svg>
