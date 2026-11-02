@@ -99,6 +99,11 @@ Almost every modern SNARK is assembled from three parts.
 
 The PIOP decides *what* is proven. The PCS decides *how much it costs* and *what it is secure against*. This project changes both relative to plonkfri: HyperPlonk replaces PLONK as the PIOP, and WHIR replaces FRI as the PCS.
 
+> [!TIP]
+> **What happens if a protocol is sound overall but not round-by-round sound?**
+>
+> Fiat–Shamir can then collapse it. The textbook example: a protocol in which a cheater survives each round with probability 1/2, repeated 128 times in sequence. Interactively the cheater wins with probability 2^-128. After Fiat–Shamir it can attack the rounds one at a time: it re-hashes until the current challenge suits it, which takes about two tries per round, and then moves on. About 256 hash evaluations break a "128-bit" protocol. Our components avoid this because each round alone has a tiny error. For sumcheck that is d/|F|; for WHIR/zook it is proven in 2026/391 §2.1.
+
 > [!NOTE]
 > **Why split a SNARK into a PIOP and a PCS at all?**
 >
@@ -174,6 +179,11 @@ For a table T, the MLE is
 
 The function eq(b, ·) is 1 at b and 0 at every other point of the hypercube; it is the multilinear "indicator" of b. In code, gnark-crypto's `polynomial.MultiLin` stores T̃ simply as the table of its 2^μ values. Here the first variable X₁ is the **most significant bit** of the row index. This bit-order convention matters everywhere; getting it wrong is a classic bug.
 
+> [!TIP]
+> **What happens if two components disagree on the bit order?**
+>
+> They then compute different polynomials from the same table. Reading the index LSB-first reverses the order of the variables; for μ = 2 it swaps X₁ and X₂. In the toy below, T = (3, 1, 4, 1) evaluated at (2, 3) gives 90 with MSB-first, but the swapped reading gives T̃(3, 2) = 93. If the PIOP's linear forms assume one order and WHIR's folding the other, every honest proof is rejected. A partial mismatch is worse, because it can make a check pass for the wrong reason. That is why `CONVENTIONS.md` fixes the order and why a property test of the bit order is the first WHIR test to be written (SPEC-WHIR §5, pitfall 3).
+
 > [!NOTE]
 > **Why is the multilinear extension unique, and why does that matter?**
 >
@@ -239,6 +249,11 @@ Why multilinear? The main tool for checking "this holds on every row", the **sum
 
 **The same example with a lie.** Suppose the prover claims S = 5. Round 1 must satisfy s₁'(0) + s₁'(1) = 5, so s₁' ≠ s₁ (two different lines). The best the cheater can do is a line that agrees with the true s₁(t) = 4t at as many points as possible, e.g. s₁'(t) = 5t, which agrees only at t = 0. With r₁ = 5 the new claim is s₁'(5) = 25, but the truth is s₁(5) = 20: the lie has been pushed into round 2. Round 2 again needs a wrong line, s₂'(t) = (5 + 10t) + 5t, which agrees with the true s₂ only at t = 0. With r₂ = 7 the final check compares s₂'(7) = 13 with F(5, 7) = 75 and **rejects**. The cheater survives only if r₁ or r₂ lands on an agreement point: probability ≤ 2/97 here, ≤ μ·d/|F| ≈ 2^-248 in bn254.
 
+> [!NOTE]
+> **Why do the round errors add up (μd/|F|) instead of multiplying ((d/|F|)^μ)?**
+>
+> Because the cheater needs only *one* lucky round, not all of them. Once r_i lands on a point where the false s_i agrees with the true one, the claim becomes true again, and every later round passes honestly. Each round is therefore a separate chance to escape, and the union bound adds them. More rounds mean slightly *more* risk, not less. In bn254 this does not matter: μ = 16 rounds of degree 4 give 64/|F| ≈ 2^-247.6.
+
 > [!TIP]
 > **What happens if the field is small, say 31 bits?**
 >
@@ -276,6 +291,11 @@ Why multilinear? The main tool for checking "this holds on every row", the **sum
 ### 3.3 Reed–Solomon codes, proximity and Merkle trees
 
 A **Reed–Solomon code** RS[F, L, d] is the set of evaluation vectors (f(x))_{x∈L} of all polynomials f of degree < d on an evaluation domain L ⊂ F with |L| > d. Its **rate** is ρ = d/|L|. Two different codewords differ in at least a 1 − ρ fraction of positions. That redundancy is what lets a verifier who reads only a few positions catch a cheater.
+
+> [!NOTE]
+> **Why do two codewords differ in at least a 1 − ρ fraction of positions?**
+>
+> Two different polynomials of degree < d agree on at most d − 1 points, since their difference is a non-zero polynomial of degree < d. So they differ on at least |L| − d + 1 of the |L| positions, which is more than (1 − ρ)·|L|. In the toy below (d = 2, |L| = 8) that is at least 7 of 8. Lowering the rate pushes codewords further apart, and that is the whole reason a lower rate makes each query worth more.
 
 > [!NOTE]
 > **Why evaluate on a multiplicative subgroup?**
@@ -355,6 +375,11 @@ The fork's first backend, `backend/plonkfri`, is described in detail in `PROJECT
 Why move on from plonkfri? Its size comes from opening 16 univariate polynomials (including the FRI mask) committed in 5 Merkle trees, at two points (ζ and ωζ), at large FFT domains, plus FRI's folding chain. HyperPlonk opens fewer polynomials at **one** point, in three trees. WHIR's rounds shrink the domain faster than FRI, so later rounds need far fewer queries.
 
 > [!NOTE]
+> **Why does PLONK need the second point ωζ, while HyperPlonk needs only one?**
+>
+> PLONK's grand product accumulates row by row: the identity relates Z(ωX), the accumulator at the *next* row, to Z(X). Checking it at ζ therefore requires Z(ωζ) as well. HyperPlonk's own product check has a similar structure on the hypercube: an accumulator table of μ + 1 variables whose entries are products of other entries, so it must be opened at several related points, some with boolean coordinates (§5.3). LogUp replaces the running product by a plain *sum* over all rows, and a sum has no "next row" relation. So every column is needed only at the single point ρ where the sumcheck ends.
+
+> [!NOTE]
 > **Why not just optimise plonkfri instead?**
 >
 > Some of plonkfri's cost can be cut (Merkle multiproofs, proof-of-work, fewer trees), and those items are on its own follow-up list. But the structure stays: PLONK needs a quotient polynomial of degree about 3n, opening points at ζ and ωζ, and several committed rounds, all encoded at large FFT domains. HyperPlonk + WHIR changes the structure itself — one opening point, stacked tables, a rate that drops every round — so it is the better place to look for a large factor.
@@ -403,6 +428,11 @@ The columns become multilinear polynomials:
 
 Every wire position (column j, row i) has a label id_j(i) = j·n + i. σ maps each position to the next position holding the *same variable*. Copy constraints ("these cells hold the same value") are exactly "w is invariant under σ". The identity labels are a linear function the verifier computes itself; they are never committed.
 
+> [!TIP]
+> **What happens if two cells received the same label j·n + i by mistake?**
+>
+> Labels must be distinct, because the permutation argument compares multisets of (value, label) pairs. If two cells shared a label, the multiset {(w, id)} would no longer say which value sits at which position. The soundness argument, "equal multisets imply w is constant on every σ-cycle", would then fail, and the cells sharing the label are where a cheater would look for room. The labels j·n + i are distinct as integers for j ≤ 2 and i < n. They are also distinct as field elements, since 3n ≤ 3·2^17 is far below p. That is why id_j can be a simple linear function of the row bits, with no randomness and no commitment.
+
 **Running example: x² + x + 5 = out.** The secret is x = 3 and the public output is out = 17 (all arithmetic in F₉₇). gnark would compile it into roughly these rows (n = 4, μ = 2):
 
 | row | q_L | q_R | q_O | q_M | q_C | w₀ (L) | w₁ (R) | w₂ (O) | the row says |
@@ -429,6 +459,11 @@ The gate polynomial is
   f(X) = q_L w₀ + q_R w₁ + q_O w₂ + q_M w₀ w₁ + q_C + PI(X),
 
 with PI(X) = Σ_i pub_i · eq(⟨i⟩, X), the MLE of the public-input column. On a public placeholder row, q_L = −1 and the other selectors are 0, so the row reads −w₀ + pub_i = 0: the public value is forced into the witness.
+
+> [!TIP]
+> **What happens if a circuit has no public inputs at all (ℓ = 0)?**
+>
+> This is explicitly allowed (SPEC-PIOP §0). PI ≡ 0, there are no placeholder rows, and the gate check is the plain PLONK gate. The proof then says only "I know *some* satisfying witness for this circuit". That can still be meaningful, but it is bound to nothing outside the circuit. The verifier still checks that it was given exactly ℓ public values (here none), and a non-empty public input against an ℓ = 0 key is rejected.
 
 > [!NOTE]
 > **Why does the gate degree matter so little here?**
@@ -487,7 +522,18 @@ We use the **logarithmic derivative ("LogUp")** technique (Haböck, ePrint 2022/
 > Then Z_j = h_j·a_j·b_j − (b_j − a_j) is non-zero on that row, and the zerocheck part of the batched sumcheck catches it like any violated gate. If instead every h is right row by row but the copies are broken (the toy cheater above), the per-row checks pass and the *sum* Σ h is non-zero (44 in the toy). The two checks cover the two ways to cheat.
 
 - **Edge case worth understanding.** If a_j = b_j = 0 on some row, then Z_j = 0 for *any* h, so h is unconstrained there. This can only happen at a fixed point of σ (a wire used once) when γ happens to equal −w − β·id. W is committed before γ is drawn, so the probability is ≤ 3n/|F|, negligible but tested explicitly. The honest prover simply fails if any a_j or b_j is zero, with probability ≤ 6n/|F|.
+
+> [!TIP]
+> **What happens if the prover skips the explicit zero check and calls `fr.BatchInvert` directly?**
+>
+> gnark-crypto's batch inversion silently maps 0 to 0 instead of failing. On a row where a_j = 0, the prover would then compute h_j = 0 − 1/b_j, which does not satisfy h_j·a_j·b_j = b_j − a_j (the left side is 0, the right side is b_j). The honest proof would be rejected for no visible reason. The event has probability ≤ 6n/|F| ≈ 2^-235 at n = 2^16, so no random test would ever hit it. That is why SPEC-PIOP §2.1 makes the zero check before inversion mandatory and why a test forces the case.
+
 - **Alternative.** *LogUp-GKR* (Papini–Haböck, ePrint 2023/1284) would avoid committing to h entirely, saving maybe 20–25 % of the proof. It is postponed to a later version because its zero-knowledge treatment is harder.
+
+> [!NOTE]
+> **Why one helper per wire column, h_j = 1/a_j − 1/b_j, instead of a single helper for the whole row?**
+>
+> A single helper h = Σ_j (1/a_j − 1/b_j) would need a row identity that clears all six denominators: h·Π_j a_j b_j = (a sum of products of five factors). That is degree 7 in the committed columns, so the sumcheck degree would be 8 rather than 4. Three helpers keep each row identity at h_j·a_j·b_j = b_j − a_j, degree 3 (4 with eq). They cost two more columns in the H stack. H is still one tree and one opening, and a stack of μ + 2 variables instead of μ + 1 makes that opening only about 4 % larger (`param_model.py`: 192 vs 185 KiB at m = 18 vs 17).
 
 > [!NOTE]
 > **Why does a permutation check look like a lookup argument?**
@@ -506,6 +552,11 @@ After committing to H, the verifier sends α and a random point r ∈ F^μ. One 
 - **Degree.** The highest-degree terms are eq·q_M·w₀·w₁ and eq·h·a·b, both of degree 4, so each round message has 4 field elements.
 
 > [!NOTE]
+> **Why one random α and its powers, rather than four independent random coefficients?**
+>
+> Both work. With independent coefficients a false combination survives with probability 1/|F|. With powers of α it survives only if α is a root of a non-zero polynomial of degree 4, so with probability ≤ 4/|F| ≈ 2^-251.6. Those two bits are irrelevant here. In exchange, the transcript needs one challenge instead of four, and the verifier and the specification have one label fewer to get right. A 64-bit field would see it differently, because there every factor of 4 counts.
+
+> [!NOTE]
 > **Why is the LogUp sum term outside the eq(r, x) factor?**
 >
 > Because it checks a different thing. The bracket must be zero on *every* row (a zerocheck), and eq(r,x) is what turns that into one random evaluation. The LogUp total, in contrast, must only *sum* to zero over all rows; weighting it by eq(r,x) would instead check h̃(r) = 0, which is false for an honest prover. Random powers of α let both kinds of checks share one sumcheck: a false combination survives only if α hits a root of a degree-4 polynomial.
@@ -517,6 +568,11 @@ At the end, the sumcheck leaves the verifier with one random point ρ ∈ F^μ a
 3. compares it with the final claim.
 
 All that remains is to show that the 14 values are the true evaluations of the committed polynomials.
+
+> [!TIP]
+> **What happens if the prover sends a false value for one of the 14 evaluations, say w₁(ρ)?**
+>
+> The sumcheck's final check might still pass, because the prover can choose its lie so that the recomputed expression matches the final claim. But the lie then sits inside the claim y_W = Σ_j eq(τ_W, ⟨j⟩)·w_j(ρ) that WHIR must open. τ_W is drawn after the 14 values are absorbed, so the false claim differs from the true one by eq(τ_W, ⟨1⟩)·(error). That difference is non-zero except with probability ≈ 2/|F|, and WHIR rejects a false opening with probability ≥ 1 − 2^-130. "Lie at ρ for each committed column" is one of the required attack tests (SPEC-PIOP §5).
 
 > [!NOTE]
 > **Why does the verifier need openings for the selectors — it knows the circuit?**
@@ -548,12 +604,22 @@ flowchart LR
 All 14 claims concern the same point ρ. For each stack, the verifier draws a random selector point τ and asks for **one** opening: "the linear combination Σ_j eq(τ, j)·column_j(ρ) is y". A random linear combination of claims is true for random τ only if all claims are (Schwartz–Zippel again). So three PCS openings in total, and no extra "batch evaluation" sumcheck.
 
 > [!NOTE]
+> **Why are τ_P, τ_W, τ_H drawn only after all 14 evaluations are absorbed?**
+>
+> A random linear combination catches inconsistent claims only if the claims are fixed before the weights are known. If τ_W were known in advance, a cheater could lie by +e·eq(τ_W, ⟨1⟩) in w₀(ρ) and by −e·eq(τ_W, ⟨0⟩) in w₁(ρ). The two errors would cancel in y_W, and the WHIR opening of the honest table would succeed. This is the same "commit, then challenge" rule as everywhere else: schedule step 7 (the 14 evaluations) comes strictly before step 8 (the τ's) in SPEC-PIOP §3.
+
+> [!NOTE]
 > **Why not commit every column in its own Merkle tree?**
 >
 > Because round 0 of each opening costs about 91 Merkle paths, and that cost is per *tree*, almost independent of the tree's size. Fourteen trees would mean fourteen times that; three stacked trees cost three times. And why a *random* τ rather than, say, summing the columns? A fixed combination would let a cheater lie by +1 in one column and −1 in another; random weights make such cancellations succeed only with probability ≈ 2/|F|.
 
 
 The fourth slot of W and H holds the zero-knowledge masks (§7) and is zero in non-ZK mode. The linear form the PCS checks must give that slot weight 0, or touch it only through specific cells. This point was caught by the first independent review.
+
+> [!TIP]
+> **What happens if the linear form for W gives slot 3 its natural weight eq(τ_W, ⟨3⟩)?**
+>
+> In non-ZK mode the slot is zero, so nothing visible happens. In ZK mode two things break (SPEC-PIOP §2.4). Completeness fails: the opened value would include eq(τ_W, ⟨3⟩)·M_W(ρ), which the PIOP's claimed y_W does not contain, so honest proofs are rejected. And a "fix" that also reveals M_W(ρ) would leak, because M_W(ρ) is a random combination of the Libra coefficients that the Libra lemma does not cover. The spec therefore requires a completeness test with non-zero M_W.
 
 > [!NOTE]
 > **Why is P committed at setup rather than by the prover?**
@@ -585,6 +651,11 @@ The transcript, a SHA-256 hash chain with labelled challenges, absorbs, in this 
 
 
 A single file in the code defines this schedule, used by both prover and verifier (plonkfri lesson (f)). A byte-level grammar is written down before the code (`FS-GRAMMAR.md`, milestone M0a): exact length encodings, domain-separation bytes, how a 512-bit hash output is reduced to a field element to avoid bias, and how query indices are sampled.
+
+> [!TIP]
+> **What happens if the absorb encoding has no length prefixes?**
+>
+> Then two different transcripts can hash to the same state. Absorbing "ab" followed by "c" would be the same bytes as "a" followed by "bc". A prover could shift bytes from one message to the next, for example between a root and the field elements after it, without changing any challenge. The grammar therefore writes a domain byte, a length-prefixed label and length-prefixed data for every absorb (SPEC-PIOP §3). Parsing the transcript is then unambiguous, and only an actual hash collision can make two different message sequences collide.
 
 > [!NOTE]
 > **Why a 512-bit hash output for a 254-bit field element?**
@@ -625,6 +696,11 @@ An evaluation P(z) is the linear form eq(z, ·). Our stacked claims from §5.5 a
 Folding with α ∈ F^k (Σ_b eq(b, α)·chunk_b) gives the encoding of the folded table P(α, ·). The verifier can recompute that from one leaf with 2^k multiplications. This is the "interleaved RS" view of ePrint 2026/391 (Claim 2.9), and what the reference implementation does.
 
 > [!NOTE]
+> **Why put all 2^k chunk values at x into one Merkle leaf, rather than one tree per chunk?**
+>
+> A shift query needs *all* K = 16 chunk values at the same point x, because the verifier folds them itself with eq(·, α). With one leaf per x, those 16 values cost one Merkle path. With 16 separate trees they would cost 16 paths per query. The leaf is bigger (512 B), but 15 of every 16 Merkle paths disappear, and the round-0 batch of ≈ 91 queries is opened with 91 paths instead of 1 456.
+
+> [!NOTE]
 > **Why fold k = 4 variables per round, not 1?**
 >
 > Each round adds a Merkle tree, an OOD sample and a batch of queries, so fewer rounds mean a smaller proof; but each leaf holds 2^k field elements, so larger k makes every opened leaf bigger. k = 4 (16 elements per leaf) is the value the plan pins for the reference harness and a good balance for 2^14–2^20 rows; the frozen parameter table makes changing it later a matter of adding rows.
@@ -635,6 +711,11 @@ Folding with α ∈ F^k (Σ_b eq(b, α)·chunk_b) gives the encoding of the fold
 <p align="center"><img src="figures/interleaved-rs.svg" alt="Interleaved encoding of (3,1,4,1): two chunk codewords, one leaf highlighted at x=4, folded with alpha=5 to 12." width="860"></p>
 
 bn254's scalar field has 2-adicity 28 (its multiplicative group has a subgroup of order 2^28), so domains are limited to 2^28 points. That is ample, since m − k + log₂(1/ρ) ≤ 28.
+
+> [!NOTE]
+> **Why a plain subgroup in natural order, when plonkfri had to move FRI to a coset?**
+>
+> plonkfri's problem was specific to PLONK. Its blinding vanished on the circuit domain H, which sat inside the FRI domain, so 1 query in 16 revealed a raw wire value (`PROJECT.md`, fix B). HyperPlonk has no circuit domain on the evaluation side. The table is indexed by the hypercube and read as *coefficients* of the chunk polynomials, and ZK comes from randomness in the encoding (§7.3), not from a blinding term that vanishes somewhere. A plain subgroup is what the reference uses (`rs_in_order`), so known-answer tests can compare leaf j at the point ω^j directly. A coset would change every leaf and buy nothing.
 
 > [!NOTE]
 > **Why does 2-adicity matter?**
@@ -661,6 +742,11 @@ We implement WHIR in the structure of 2026/391, which the reference implementati
 
 4. **Shift queries.** The verifier samples t_i random positions of the *previous* codeword, the prover opens those Merkle leaves, and the verifier folds them itself. The results, and the OOD answer, become new linear constraints added to w, with fresh random weights.
 
+> [!TIP]
+> **What happens if two of the t_i query positions coincide?**
+>
+> It happens regularly. In round 0 at m = 18 the domain has 2^17 points, and 91 random positions contain a repeat with probability ≈ 3 %. Over all phases of the three openings of a 2^16-row proof the chance of at least one repeat is about 17 %, a birthday-bound estimate on `param_model.py`'s layouts. A repeated position adds nothing, so v1 deduplicates indices and opens each leaf once. Prover and verifier must deduplicate identically, otherwise they disagree on how many leaves the proof contains and the honest proof is rejected (SPEC-WHIR §5, pitfall 5). Soundness is unaffected. The bound (1 − δ)^t is for t independent draws, repeats included, so opening fewer distinct leaves loses nothing.
+
 <p align="center"><img src="figures/whir-rounds.svg" alt="Bars on a log scale: per round the message shrinks 16x while the codeword only halves; queries fall 90, 44, 29." width="860"></p>
 
 > [!NOTE]
@@ -686,7 +772,17 @@ sequenceDiagram
     Note over V: fold leaves itself, add OOD + shift constraints with fresh weights
 ```
 
+> [!NOTE]
+> **Why rejection-sample the OOD point outside L ∪ {0, 1}, when the reference samples uniformly from F?**
+>
+> In practice the two choices behave the same. With |L| ≤ 2^28 a uniform draw lands in L ∪ {0, 1} only with probability ≈ 2^-226, so resampling almost never happens. The rule (SPEC-WHIR §5, pitfall 2, a recorded deviation) makes "out of domain" literally true and so removes a degenerate case from the analysis and the tests. A point of L would be a position the committed codeword already fixes, so its answer would add no new information. The price is one comparison loop, and prover and verifier must apply it identically, like every other sampling rule.
+
 **Base case.** Once few variables remain (fewer than 2k), the prover sends the remaining vector. The verifier spot-checks it against the last codeword, a final sumcheck finishes the evaluation, and one last equation ties everything back to the original linear forms.
+
+> [!NOTE]
+> **Why stop folding at fewer than 2k variables and send the vector in clear?**
+>
+> One more round would add a Merkle root, an OOD answer and its sumcheck messages, and it would still need queries. Sending ≤ 2^7 = 128 field elements (4 KiB) directly is cheaper once the message is that small. The verifier can then evaluate it itself, and only the 22 spot checks against the last codeword and a short final sumcheck remain. The rule "fold while ≥ 2k variables remain" is the reference's layout rule (SPEC-WHIR §2). After at least one round it leaves between k and 2k − 1 variables for the base case: 4 to 7 here, e.g. 6 at m = 18.
 
 > [!TIP]
 > **What happens if the prover sends a base-case vector of the wrong length?**
@@ -710,6 +806,11 @@ The per-round error bounds come from WHIR Thm 5.2. The number of queries t_i in 
 where δ_i is the proximity parameter for that round and z_i is optional *proof-of-work* (grinding) bits.
 
 > [!NOTE]
+> **Why the slack η = √ρ/20, instead of going right up to the Johnson bound 1 − √ρ?**
+>
+> At exactly the Johnson bound the list-size bound 1/(2η√ρ) blows up, and so do the correlated-agreement error terms. Some gap η > 0 is mathematically required. The choice η = √ρ/20 is the spec's (SPEC-WHIR §2). It makes 1 − δ = 1.05·√ρ, so a query is worth ≈ 1.43 bits at ρ = 1/8 instead of the 1.5 bits at the bound itself, which means 91 queries instead of 87. It also fixes the list size at 10/ρ = 80. A smaller η would save a few queries, but the list bound and the correlated-agreement terms grow as η shrinks. This is an engineering trade-off inherited from the reference, not a proven optimum.
+
+> [!NOTE]
 > **Why does proof-of-work buy security?**
 >
 > Before the queries are drawn, the prover must find a nonce that makes the transcript hash start with z zero bits; the nonce is absorbed, then the query positions are derived. A cheater hoping for lucky query positions must redo this search for every attempt, so each attempt costs 2^z hashes and z fewer bits are needed from queries. For the honest prover z = 16 is about 65 000 hashes — milliseconds — in exchange for several fewer Merkle paths per round.
@@ -720,6 +821,11 @@ where δ_i is the proximity parameter for that round and z_i is optional *proof-
   - Its soundness proof needs *mutual correlated agreement up to Johnson*. The WHIR paper only conjectured this (Conj. 4.12). It is claimed proven by two Nov-2025 preprints, Bordage–Chiesa–Guan–Manzur (ePrint 2025/2051) and Haböck (ePrint 2025/2110), neither refereed yet.
   - Error constants: the reference code uses a linear-in-n constant built on ePrint 2025/2055 (whose Thm 1.5 proves ordinary correlated agreement; the *mutual* version is outlined there). The fully proven mutual bounds (2025/2051 Thm 9.2, 2025/2110 Thm 2) are quadratic in n and give ≈ 2^-191 — weaker, but in a 254-bit field still far below 2^-130, so only the query terms bind. Our independent checker uses the proven bound.
 - **Unique-decoding regime (selectable).** δ = (1 − ρ)/2, proven in the WHIR paper itself, but about 2.5–3× larger proofs.
+
+> [!NOTE]
+> **Why does unique decoding cost so much more in *later* rounds (157 → 133 → 131), while Johnson drops to 45 and 30?**
+>
+> In unique decoding a query is worth −log₂((1 + ρ)/2) bits, and that is always below 1 bit, however small the rate. At ρ = 1/8, 1/64 and 1/512 it gives ≈ 0.83, 0.98 and 0.997 bits. In the Johnson regime a query is worth ≈ −log₂(1.05·√ρ) bits, which grows by 1.5 bits every time the rate falls by 8: 1.43, 2.93, 4.43. WHIR's falling rate pays off only with list decoding. That is the main reason UD is 2.5–3× larger and not just 1.7× (157/91).
 
 > [!TIP]
 > **What happens if the 2025 Johnson-regime results turn out to be wrong?**
@@ -758,6 +864,11 @@ Each of our three openings targets λ = 130 bits, so the union of three stays ab
 *Estimates* (k = 4, ρ = 1/8, Johnson, no Merkle-path compression, λ = 128): one opening at m = 16 ≈ 176 KiB, at m = 20 ≈ 217 KiB, **including** the base-case spot checks (the 157 / 200 KiB quoted in the specs leave those out, which is about 11 % of an opening). Our openings are at m = μ + 3, μ + 2, μ + 2, giving ≈ 0.57 MiB per proof at 2^16 rows (0.51 without the base-case checks). Merkle multiproofs, a 16-bit proof-of-work, and opening W and H jointly could bring that to ≈ 0.3–0.4 MiB. §9.4 walks through the numbers for 2^14 and 2^16 rows.
 
 > [!NOTE]
+> **Why is proof-of-work 0 in v1, if 16 bits cost the prover only milliseconds?**
+>
+> Because where the grind sits in the transcript, and which error term it is credited against, is a soundness decision, not a tuning knob. The reference grinds *before* the OOD challenge ("Lemma 9.9 OOD gap"), whereas the query rule of this section credits grinding bits z_i to the query term. Getting the credit wrong would quietly weaken the security claim. Grover-type search also halves the value of PoW bits against a quantum attacker. v1 therefore fixes PoW at 0 and decides the placement in M4, together with multiproofs and with a written note (SPEC-WHIR §2, PLAN §11 #9).
+
+> [!NOTE]
 > **Why does the proof barely shrink for smaller circuits?**
 >
 > The number of round-0 queries depends only on the security level and the rate (≈ 91 for 130 bits at ρ = 1/8), not on the circuit size. A smaller circuit shortens each Merkle path by a few hashes and drops a round, but the dominant cost — about 91 paths per tree — stays. That is why the estimate at 2^14 rows (≈ 0.53 MiB) is close to the one at 2^16 (≈ 0.57 MiB).
@@ -780,7 +891,12 @@ If we built original WHIR first and the ZK variant later, the second would be a 
 > Proofs stay sound — Standard mode is the same protocol without the masks — but they leak information about the witness (round messages, w(ρ), opened codeword rows). The mode is part of the verifying key and its digest, so it cannot be switched silently per proof, and the Panurus integration rejects verifying keys whose mode is Standard (PLAN R13).
 
 
-One consequence: without commit-time OOD, the initial commitment in the Johnson regime binds the prover only to a *list* of up to about 10/ρ = 80 codewords (measured at the initial rate of the parameter-table row; power-of-two rounding in ZK mode can lower the effective rate slightly, and in later rounds far below nominal, but only the round-0 rate enters the union bound of §8.2). §8.2 explains why that is harmless.
+One consequence: without commit-time OOD, the initial commitment in the Johnson regime binds the prover only to a *list* of up to about 10/ρ = 80 codewords (measured at the initial rate of the parameter-table row; in ZK mode the masking coefficients shift the round-0 rate slightly (L ≈ 78–80), and power-of-two rounding can push later rounds' rates far below nominal, but only the round-0 rate enters the union bound of §8.2). §8.2 explains why that is harmless.
+
+> [!TIP]
+> **What happens if the OOD constraint is accidentally dropped from a round?**
+>
+> The honest prover still passes, so honest tests stay green. A cheater, however, is no longer pinned to one list member. It can keep several close codewords "in play" and choose later which one to answer for, and the soundness proof no longer applies. SPEC-WHIR §5 (pitfall 2) requires exactly this mutation test: with a "skip OOD constraint" switch, a list-decoding cheater must be *accepted*, and with the constraint in place it must be rejected. That proves the OOD check is what stops it.
 
 > [!NOTE]
 > **Why not add the commit-time OOD sample back in non-ZK mode?**
@@ -799,6 +915,11 @@ A token proof must not leak amounts or keys, so ZK is mandatory before Panurus u
 - the sumcheck round messages, which are sums of the witness;
 - the evaluations w_j(ρ) and h_j(ρ);
 - WHIR's opened Merkle rows, OOD answers, internal sumcheck messages and final vector.
+
+> [!NOTE]
+> **Why do the 14 evaluations at ρ need masking, if ρ is a random point no one chose?**
+>
+> A random point does not hide anything. w̃_j(ρ) = Σ_x w_j[x]·eq(x, ρ) is a public linear combination of the witness with known coefficients, since everyone can compute eq(x, ρ). One such value already narrows the witness down. If only one cell is secret, it reveals that cell exactly. Masking adds c_j·ρ₁(1 − ρ₁) with a fresh secret c_j, which makes the revealed value uniform whatever the witness is.
 
 > [!NOTE]
 > **Why would sums leak anything?**
@@ -850,6 +971,11 @@ Each round message then contains fresh random coefficients from g, so the messag
 **Where the mask coefficients live.** WHIR commitments are not additive: you cannot add a commitment to c to a commitment to w. The coefficients c_j and the Libra coefficients therefore sit **inside** the fourth slot of the W stack (and of H), and the linear form for the opening picks them up cell by cell. A design with a separate fourth commitment for the masks was considered and rejected in the review debate: the opened value of W would then be an unmasked combination of witness values.
 
 > [!NOTE]
+> **Why a sum of univariates g₀ + Σ g_i(x_i), and not a fully random polynomial in μ variables?**
+>
+> A random polynomial that is at least multilinear in all μ variables has at least 2^μ coefficients, as many as a witness column. It would fill a whole slot, and it would cost as much to compute with as the witness. A sum of univariates has only 1 + 7 + 4(μ − 1) = 4μ + 4 coefficients, 68 at μ = 16. Its hypercube sum has a closed form, and in round i only g_i varies, so each round message is re-randomised by g_i's own fresh coefficients. That is what the simulator needs (Libra; HyperPlonk App. A.3), and it is why the whole mask fits next to c₀, c₁, c₂ in W's spare slot.
+
+> [!NOTE]
 > **Why not hide the witness with random padding rows instead?**
 >
 > Random rows would have to satisfy every gate and copy constraint, and the derived columns (the LogUp helpers h) are computed from the witness, so their padding cannot simply be random. Adding the mask X₁(1 − X₁) changes nothing on the hypercube, so every constraint keeps holding automatically, and the effect on revealed values is easy to analyse.
@@ -865,6 +991,11 @@ Each round message then contains fresh random coefficients from g, so the messag
 
 **Prover subtlety.** The masks make the first sumcheck round degree 7, because w* is quadratic in X₁ and the gate multiplies masked columns. They enter non-linearly: q_M·w*₀·w*₁ contains c₀c₁·t²(1−t)². So the prover must add each mask to its column *before* combining columns. The sumcheck package has a dedicated round-1 hook for this. A test compares it with brute-force evaluation on a tiny instance.
 
+> [!TIP]
+> **What happens if ρ_g is 0?**
+>
+> Then the sumcheck runs on F* + 0·g, so the Libra mask vanishes from every round message, and the messages are again sums of the witness. Soundness is untouched, but zero knowledge for that proof is lost. Unlike ρ₁ ∈ {0, 1}, this case is cheap to rule out, so the schedule resamples ρ_g with an incremented counter if it comes out 0 (SPEC-PIOP §3, step 5). The verifier derives ρ_g the same way, so both sides agree on the resampled value.
+
 > [!NOTE]
 > **Why degree 7 exactly?**
 >
@@ -878,6 +1009,11 @@ WHIR's own messages are made simulatable by four mechanisms:
 - **ZK sumcheck inside WHIR** (Construction 6.3): small random mask polynomials, committed in a separate small Merkle tree before the sumcheck.
 - **ZK code switch** (Construction 9.7): the folded randomness is carried into the next round through a second small "code-switch mask" tree, and OOD answers go through a **private zero-evader** (Def. 9.2), so they are uniform.
 - **Mask proximity and a ZK base case** (Construction 7.2): every round proves the mask trees are honest codewords, and the final vector is sent only blinded.
+
+> [!NOTE]
+> **Why must each chunk carry at least t + s random coefficients?**
+>
+> In one round the verifier sees each chunk polynomial at t query positions plus s OOD points. Those revealed values look uniform only if the random part of the encoding can independently hit any t + s values. That requires at least t + s random coefficients, for the same Vandermonde reason as in plonkfri's fix C. At t = 91 and s = 1 that is 92 extra coefficients per chunk (Prop. 3.19). They lengthen the message while the codeword length stays the same (the reference keeps it if the rate stays ≤ 1.2ρ). The effective round-0 rate therefore rises slightly *above* 1/8, to ≈ 0.1257 at m = 18. By the query rule that costs one more round-0 query, 92 instead of 91, and it shortens the list bound 10/ρ′ to ≈ 78–80.
 
 Two deliberate deviations from the reference implementation (pinned at commit `c73b8d3` of github.com/WizardOfMenlo/whir):
 1. **Salted Merkle leaves.** The reference does not salt. Without salts, a verifier who guesses a low-entropy witness (say a small token amount) could solve for the encoding randomness from the opened rows, recompute an unopened leaf and compare its hash, confirming the guess. With 32 random bytes per leaf this fails. A dedicated test shows the attack working without salts and failing with them.
@@ -895,6 +1031,11 @@ Two deliberate deviations from the reference implementation (pinned at commit `c
 
 
 **Cost.** Two extra small trees per round, each queried about 68 times (the mask code has rate 1/16, so a query is worth more than in the main code: 68 queries in the Johnson regime, 143 in unique decoding). The estimated overhead is +40–80 % of total proof size, to be measured with the reference implementation before the WHIR code is written (gate G0).
+
+> [!TIP]
+> **What happens if the same ZK oracle is opened twice with independent query sets?**
+>
+> The per-chunk randomness is sized for one opening: t + s revealed positions. A second, independent set of queries reveals up to t more positions of the same codeword. The number of revealed values can then exceed the number of random coefficients, and the remaining linear combinations depend on the witness alone. That is the same leak as reusing randomness across proofs, but within a single proof. SPEC-WHIR §3 therefore has an explicit rule, "never open one ZK oracle twice with independent query sets". The PIOP is built to respect it: W and H are each opened exactly once, with all their claims batched into one linear form.
 
 > [!NOTE]
 > **Why does ZK cost so much more than the PIOP masks suggest?**
@@ -916,6 +1057,11 @@ Two deliberate deviations from the reference implementation (pinned at commit `c
 - in each WHIR sub-protocol, the encoding randomness maps onto the opened rows and OOD answers with full rank;
 - with ZK off, w_j(ρ) can be recovered from the transcript; with ZK on, the same procedure fails;
 - the salt attack of §7.3.
+
+> [!NOTE]
+> **Why split the rank test into separate sub-tests instead of one big matrix?**
+>
+> Because the revealed values are not a linear function of *all* the randomness. In round 1 the masked gate contains products such as c₀c₁·t²(1 − t)², quadratic in the mask coefficients, so "the rank of the map" is not defined for the whole thing. The second design review caught this (PLAN §11 #5). The fix fixes some randomness and tests linear pieces separately. With c_j fixed, the Libra coefficients map affinely onto the round messages. Separately, c_j maps linearly onto w*_j(ρ), h*_j(ρ). And each WHIR sub-protocol gets its own test (SPEC-PIOP §4, tests (a)–(c)).
 
 **Revealed-value inventory** (each item and what covers it):
 
@@ -946,6 +1092,11 @@ Two deliberate deviations from the reference implementation (pinned at commit `c
 | LogUp a = b = 0 case | 3n/\|F\| | 2^-236.0 |
 | Libra ρ_g, stacking τ | 1/\|F\| + 7/\|F\| | ≈ 2^-250.6 |
 | **each WHIR opening** | **2^-130 target** | **dominant** |
+
+> [!NOTE]
+> **Why is LogUp the largest algebraic term, at 9n/|F|?**
+>
+> Apart from the related a = b = 0 case (3n/|F|), every other check has an error of at most a few times μ/|F|, because its polynomial's degree is a small constant or grows only with μ. LogUp's identity in γ is a sum of 6n fractions. Clearing denominators gives a numerator of degree < 6n in γ, and the β-compression of (value, label) pairs adds 3n/|F|. The error therefore grows with the number of rows n, not with log n. At n = 2^16 that is 2^-234.4, and even at MaxLogSize (n = 2^17) it is 2^-233.4. It is still ≈ 100 bits below the WHIR terms, which is why a 254-bit field can afford a linear-in-n term.
 
 The PIOP terms sit about 100 bits below the PCS terms: in a 254-bit field the algebra is essentially free, and the hash-based commitment sets the security level. The non-interactive version uses Fiat–Shamir. Every round is round-by-round sound (sumcheck rounds trivially; WHIR/zook by 2026/391 §2.1). An attacker making 2^128 hash queries gains at most about 2^-92 on the PIOP terms, even after the list loss below. What "128 bits" means precisely, including the hash-digest term, is spelled out in §8.1.1.
 
@@ -978,12 +1129,22 @@ So "128-bit security" in this document is a **work-factor statement**: no attack
 
 Quantum adversaries are covered by the note in §2.3 (the bound degrades to Θ(Q·ε_fs), and collision search gains a further speed-up).
 
+> [!NOTE]
+> **Why does the Fiat–Shamir bound multiply ε_rbr by Q, the number of hash queries?**
+>
+> Each hash evaluation is one try. The attacker changes a message, re-hashes and hopes the new challenge is one of the bad ones for the current round. Each try succeeds with probability at most ε_rbr, and the union bound over Q tries gives Q·ε_rbr. This is why ε_rbr must be far below 2^-128 if the attacker may make 2^100 or more queries. It is also why proof-of-work helps: it makes each try cost 2^z hash evaluations, so Q effectively shrinks by 2^z.
+
 ### 8.2 The list-decoding subtlety
 
-In the Johnson regime, a commitment to W (or H) is consistent with up to L ≈ 10/ρ polynomials, where ρ is the *initial* rate of the parameter-table row: 80 at ρ = 1/8 (slightly more in ZK mode if rounding lowers it). A cheater may effectively pick which one to "mean" after seeing later challenges. A union bound covers this:
+In the Johnson regime, a commitment to W (or H) is consistent with up to L ≈ 10/ρ polynomials, where ρ is the *initial* rate of the parameter-table row: 80 at ρ = 1/8 (≈ 78–80 in ZK mode, where the masking coefficients shift the round-0 rate slightly; SPEC-PIOP §5). A cheater may effectively pick which one to "mean" after seeing later challenges. A union bound covers this:
 - PIOP steps before H is committed lose at most a factor L_W;
 - steps after it lose at most L_W·L_H ≈ 80² = 6 400, i.e. about 12.6 bits off 2^-234: harmless (even a list twice as long would cost under 15 bits).
 - With ZK encoding the argument still holds (the list lives in the masked code and projects to at most L messages).
+
+> [!NOTE]
+> **Why does the list loss multiply by L_W·L_H, and not add L_W + L_H?**
+>
+> The cheater's choices are combined. For the steps after H is committed it may, in effect, pick any member of W's list *and* any member of H's list, so there are L_W·L_H candidate pairs. Each pair is a separate deterministic witness against which the PIOP's error ε applies, and the union bound over pairs gives L_W·L_H·ε. Before H exists only W's list matters, hence the factor L_W alone on the β, γ terms. The product sounds large, 6 400, but it is only 12.6 bits: logarithms add even when lists multiply.
 
 P is exempt for a different reason: an honestly generated P is an exact codeword, and other codewords are too far away to be on its list. That assumes the verifying key is honest. Setup is deterministic, so anyone can regenerate the key from the circuit and compare.
 
@@ -1062,6 +1223,11 @@ The diagram adds three boxes that the picture in §2 left out because they are e
 | 11 | Keys and encoding | deterministic transparent Setup; verifying key = three `pcs.Header`s + root(P) + version; proving key = tables + encoded P; magic + version, bounded lengths, canonical elements | D | §10.2 | PLAN R6, PANURUS §3 |
 | 12 | Parameter table and randomness | frozen generated table (`TableVersion` 1), row digest inside the verifying key; prover randomness from `crypto/rand` in ZK mode, none in Standard mode | D | §6.4, §7 | PLAN R12, SPEC-WHIR §4 |
 
+> [!NOTE]
+> **Why does the verifying key carry three WHIR headers instead of one shared parameter set?**
+>
+> The three openings really have different parameters. P has m = μ + 3 and is always in Standard mode. W and H have m = μ + 2 and, in a deployment, ZK mode. Each header is the exact key into the frozen table, so each opening finds its own row, and the digest of each row enters the transcript. Decoding also checks the combination: P's mode must be Standard and W's must equal H's (SPEC-PIOP §7). So a key mixing modes, for example a ZK W with a Standard H, is rejected before any proof is looked at.
+
 **Table B: the parameter card.** The last column says which cluster of §9.3 explains the value.
 
 | Parameter | Value | Status | Why (§9.3) |
@@ -1136,6 +1302,11 @@ flowchart LR
 3. **One hash for everything.** The same SHA-256 (`HashID` in each header) builds the Merkle trees and the Fiat–Shamir chain, so the verifying key states it once and the transcript binds it. A later switch to Poseidon2 (cheap inside a circuit, needed for recursion) changes the `HashID` and the parameter table, not the protocol. *Design choice*.
 
 > [!TIP]
+> **What happens if Merkle leaves and inner nodes are hashed the same way?**
+>
+> An inner node is the hash of its two 32-byte children. Without a distinguishing prefix, those 64 bytes are also a valid "leaf" whose hash equals the node, so a prover could claim that a node one level up is a leaf. It would then open a shorter path to data it never committed as a leaf. Leaf and node hashes therefore carry different domain-separation bytes, and the tree depth is taken from the parameters, never from the proof. Swapping a leaf for a node is one of the required rejection tests (SPEC-WHIR §5, pitfall 9). Our leaves (512 B, plus a salt in ZK mode) already differ in length from a node's 64-byte input, but the tree's security should not rest on that accident.
+
+> [!TIP]
 > **What happens if we used a 16-byte digest to halve the Merkle paths?**
 >
 > Paths would shrink from 15 × 32 B to 15 × 16 B and a proof by roughly a quarter, but collisions could then be found with about 2^64 work — a Merkle tree whose leaves can be swapped for others with the same hash binds the prover to nothing. The saving is paid for with the whole security of the commitment, which is why the digest length is a security parameter, not a tuning knob.
@@ -1199,16 +1370,21 @@ How to read it:
 - **The proof barely depends on the circuit size** (0.53 vs 0.57 MiB for a 4× larger circuit): the ≈ 91 + 45 + 30 + 22 queries per opening are fixed by the security level and the rate (§9.3.3), and the circuit size only adds a hash to each path and, from time to time, a round.
 - **The base-case spot checks are ≈ 11 % of an opening.** The figures "157 / 200 KiB" in earlier drafts and in the specs leave them out; the table above includes them.
 - **Memory is dominated by the encoded P**, which lives in the proving key (a fixed 32 MiB at 2^14 and 128 MiB at 2^16, plus its Merkle tree). W and H are built per proof. At 2^16 rows P + W + H is 256 MiB, which makes the ≤ 300 MiB prover target of `PLAN.md` §5 tight; at the Panurus size (64 MiB) it is comfortable. To be re-checked at G1.
-- **Zero-knowledge mode** changes these figures structurally, not by a formula we trust yet: μ ≥ 5; sumcheck round 1 has degree 7; every opened leaf carries a 32-byte salt (≈ 3 % per query); each round adds two mask trees queried ≈ 68 times each; the main-code query count rises by about 1 in round 0 because power-of-two rounding lowers the effective rate; the base case is blinded. The estimated overhead is **+40–80 % of the whole proof (E)**, to be measured at G0/G2.
+- **Zero-knowledge mode** changes these figures structurally, not by a formula we trust yet: μ ≥ 5; sumcheck round 1 has degree 7; every opened leaf carries a 32-byte salt (≈ 3 % per query); each round adds two mask trees queried ≈ 68 times each; the main-code query count rises by about 1 in round 0 (≈ 92 instead of 91), because the t + s extra random coefficients per chunk *raise* the round-0 rate slightly (to ≈ 0.126 when the codeword length is kept, SPEC-WHIR §3); the base case is blinded. The estimated overhead is **+40–80 % of the whole proof (E)**, to be measured at G0/G2.
 
 ### 9.5 What is still open
 
 - **Proof-of-work (O).** 0 in v1. The reference grinds *before* the OOD challenge; where our 16-bit option would go, and which security term it credits, is decided together with the multiproof work in milestone M4.
 - **Exact ZK query counts and sizes (E).** Mask-tree sizes follow the reference's hard-wired mask-code rate (1/16); the numbers above are structural. G0 replaces them with the reference implementation's real proof sizes in both modes.
-- **Power-of-two rounding in ZK mode (E).** It lowers the effective rate of later rounds far below nominal; that raises the query counts slightly and enlarges the lists of later rounds, which is harmless for the PIOP (only round 0 enters the union bound) but must show up in the frozen table.
+- **Power-of-two rounding in ZK mode (E).** When the masked message no longer fits at rate ≤ 1.2ρ, the codeword length is rounded up to a power of two, which lowers the effective rate — in later rounds far below nominal. A lower rate means fewer queries but a different δ and larger lists in those rounds, which is harmless for the PIOP (only round 0 enters the union bound) but must show up in the frozen table.
 - **Prover memory (E).** The 300 MiB target at 2^16 rows (G1).
 - **Integration model with Panurus (O).** Decision D8 in `PLAN.md` §4.
 - **Other hashes and fields.** Poseidon2 (for an in-circuit verifier) and a small field with extension-field challenges are deliberately not part of v1; see §13 (risks) and the small-field note in §12.
+
+> [!NOTE]
+> **Why not open W and H jointly in v1, to save part of an opening?**
+>
+> A joint opening would let W and H share part of one WHIR run instead of paying for two. It is one of the M4 items expected, together with multiproofs and proof-of-work, to bring the proof from ≈ 0.57 towards 0.3–0.4 MiB. But the reference's joint-opening code (`joint.rs`) became zero-knowledge only on 2026-10-13 and is still changing. A ZK multi-commitment opening is also exactly where a subtle leak or soundness gap would hide, since W and H are committed at different times with challenges in between. v1 therefore uses one commitment per `Open` (PLAN §3; review F7) and keeps the joint opening as a measured M4 item.
 
 ---
 
@@ -1249,7 +1425,14 @@ The API mirrors plonkfri after fork PR #9:
 - binary `WriteTo/ReadFrom` for every object;
 - exported error values.
 
-`Setup` takes options for the mode (default Standard until the ZK milestone M3e, then zero-knowledge) and the regime (default Johnson). Decoding is hardened like plonkfri's:
+`Setup` takes options for the mode (default Standard until the ZK milestone M3e, then zero-knowledge) and the regime (default Johnson).
+
+> [!TIP]
+> **What happens if someone asks for ZK mode before milestone M3e exists?**
+>
+> `Setup` returns `pcs.ErrUnsupported` instead of quietly producing a Standard-mode key (PLAN R13). A silent fallback would be the dangerous option. The caller would believe its proofs are private while they leak w(ρ), the round messages and the opened rows. The default flips to zero-knowledge only when the ZK implementation actually lands.
+
+Decoding is hardened like plonkfri's:
 - a magic number and version tag;
 - every length bounded before allocation, and reads done in chunks;
 - non-canonical field elements rejected;
@@ -1293,6 +1476,11 @@ Taken from plonkfri and made stricter by the reviews:
 - **Test seams.** The switches and cheating seams are unexported per-call settings reached through Go's `export_test.go`. Global flags would race under parallel tests, and build tags would let CI silently skip the tests.
 
 > [!NOTE]
+> **Why N = 8 attempts under `-short` and 200 otherwise, with a threshold of 0?**
+>
+> The threshold is 0 because every attack is supposed to succeed with probability ≈ 2^-130 or less. A single acceptance is therefore never bad luck, it is a bug. N is not about statistics either. It exists to catch attacks that work *sometimes*, such as plonkfri's measured 4.5 % forgery rate, which 200 attempts reveal except with probability ≈ 10⁻⁴. N = 8 catches such an attack only about a third of the time, but it keeps `go test -short` fast while still running every attack in every CI pass (PLAN R11). Attack tests are never behind a build tag.
+
+> [!NOTE]
 > **Why must an attack test also pass with the check switched off?**
 >
 > A test that rejects a cheater proves nothing if it would also reject that cheater for an unrelated reason — say, a malformed proof that fails to decode. Switching off exactly the check under test and watching the cheater get *accepted* shows that this check, and no other, is what stops the attack. plonkfri's lessons (e) and (i) record exactly this: note which check rejects each cheater, and make the test fail if the attack stops working in the unprotected variant, so it can never silently become vacuous.
@@ -1302,6 +1490,12 @@ Taken from plonkfri and made stricter by the reviews:
   - an independent **Python reference** written by a separate agent from the papers only, for known-answer tests and a row-by-row security check of the parameter table.
   
   Byte-identical proofs are not expected, since the reference uses a different transcript.
+
+> [!TIP]
+> **What happens if the parameter generator is run on an ARM laptop instead of amd64?**
+>
+> It might produce a slightly different table. The derivation uses floating-point logarithms, and the Go specification allows fused multiply-add on any architecture. arm64 fuses by default, amd64 only from `GOAMD64=v3`, so a result near an integer boundary can round to a different query count. The generator is therefore pinned to `GOARCH=amd64 GOAMD64=v1` with explicit `float64()` casts around every product, which is what actually prevents fusion. The regeneration-and-diff test runs on that same setting (PLAN M0b). The run-time code never computes parameters at all.
+
 - **Golden files.** With a fixed random seed, proofs are stored and compared, so accidental format changes are caught.
 - **Measure, don't assume.** Sizes and times are estimated in advance and measured at gates; surprises are investigated.
 
@@ -1336,6 +1530,11 @@ Taken from plonkfri and made stricter by the reviews:
 | M5 | serialization, fuzzing, race tests | — |
 | M6 | independent review(s), external review package | — |
 | M7 | Panurus integration (model per open decision D8) | user go-ahead before opening the PR |
+
+> [!NOTE]
+> **Why do cost optimisations (M4) come before serialization and hardening (M5)?**
+>
+> Multiproofs, proof-of-work and a joint W+H opening all change the proof format. Hardening the decoder, writing fuzz targets and freezing golden files before those changes would mean doing it twice. The first design review flagged exactly this churn (PLAN §10 #9). So the format is settled first, measured against G1/G2, and only then frozen and hardened. Prover-only speed-ups that leave the format alone can land any time after M2.
 
 All work happens on the feature branch `feature/hyperplonk`; each milestone is one pull request into it (decisions D5, D7), and `master` receives the whole backend in one PR after the review milestone M6. M1a/M1b run in parallel with M1c thanks to the mock PCS. Fork PR #9 (plonkfri serialization) was merged first (decision D4).
 
@@ -1399,6 +1598,11 @@ PR panurus#2539 (merged 2026-10-28) implements it for plonkfri. It does so by **
 - raised request-size limits for the new system (decision D1: Panurus limits may be raised).
 
 #2539 also rewrote a circuit gadget to avoid `api.Commit` (BSB22 commitments), which neither hash-based backend supports in v1; hyperplonk builds on that rewrite.
+
+> [!NOTE]
+> **Why do hash-based backends not support BSB22 commitments (`api.Commit`) in v1?**
+>
+> `api.Commit` lets a circuit derive a random challenge from some of its own wires. That makes the witness *multi-phase*. The prover must commit to part of the witness, receive a challenge derived from that commitment, and only then solve the rest. Upstream PLONK implements this with an extra KZG commitment inside the proof. Here it would need its own committed column, its own transcript step, and a solver that pauses mid-way to wait for the challenge. That is a protocol change, not a flag, so it is the first feature planned after v1 (SPEC-PIOP §8). Meanwhile, circuits that use it are rejected with `ErrCommitmentsUnsupported`.
 
 The transfer circuits have about 2^14 rows, so that is the size we benchmark besides 2^16. Panurus requires, among other things:
 
