@@ -2,7 +2,7 @@
 
 *A self-contained description of the effort: why we are doing it, the cryptography behind it, how it will be built and verified, and where to read more.*
 
-Written 2026-10-27. Status: design approved for review, nothing implemented yet. The normative documents are [`PLAN.md`](PLAN.md), [`SPEC-PIOP.md`](SPEC-PIOP.md), [`SPEC-WHIR.md`](SPEC-WHIR.md) and [`PANURUS.md`](PANURUS.md); this overview explains them and never overrides them. Numbers marked *estimate* have not been measured yet.
+Written 2026-10-27, extended 2026-11-02 (§9). Status: design approved for review, nothing implemented yet. The normative documents are [`PLAN.md`](PLAN.md), [`SPEC-PIOP.md`](SPEC-PIOP.md), [`SPEC-WHIR.md`](SPEC-WHIR.md) and [`PANURUS.md`](PANURUS.md); this overview explains them and never overrides them. Numbers marked *estimate* have not been measured yet.
 
 **Audience.** A master student who knows finite fields, polynomials, hash functions and basic probability, and has heard of zero-knowledge proofs, but has not worked with SNARK internals. Sections 2 and 3 give the background; skip them if you know it.
 
@@ -26,13 +26,14 @@ Written 2026-10-27. Status: design approved for review, nothing implemented yet.
 6. [The proof system, part 2: WHIR (the PCS)](#6-the-proof-system-part-2-whir-the-pcs)
 7. [Zero knowledge](#7-zero-knowledge)
 8. [Security analysis](#8-security-analysis)
-9. [Engineering design](#9-engineering-design)
-10. [How the work is organised](#10-how-the-work-is-organised)
-11. [Integration into Panurus](#11-integration-into-panurus)
-12. [Risks and open questions](#12-risks-and-open-questions)
-13. [Glossary](#13-glossary)
-14. [References (annotated)](#14-references-annotated)
-15. [Questions to test your understanding](#15-questions-to-test-your-understanding)
+9. [The instantiated system: parameters and why they fit together](#9-the-instantiated-system-parameters-and-why-they-fit-together)
+10. [Engineering design](#10-engineering-design)
+11. [How the work is organised](#11-how-the-work-is-organised)
+12. [Integration into Panurus](#12-integration-into-panurus)
+13. [Risks and open questions](#13-risks-and-open-questions)
+14. [Glossary](#14-glossary)
+15. [References (annotated)](#15-references-annotated)
+16. [Questions to test your understanding](#16-questions-to-test-your-understanding)
 
 ---
 
@@ -51,7 +52,7 @@ This repository is a **fork of gnark v0.16.3** whose goal is *post-quantum polyn
 - The **zero-knowledge variant of WHIR** (Chiesa, Fenzi, Weissenberg, ePrint 2026/391), because token amounts and keys are secret.
 - Field: the scalar field of **bn254** (a 254-bit prime field), for reasons explained in §4.
 
-Expected outcome (*estimate*): proofs around **0.5 MiB** first, falling towards **0.3–0.4 MiB** after optimisation in non-ZK mode; zero-knowledge adds an estimated 40–80 %, to be measured. Verification takes a few milliseconds. No trusted setup; security rests only on the hash function.
+Expected outcome (*estimate*): proofs of about **0.5–0.6 MiB** first (0.53 MiB at 2^14 rows, 0.57 MiB at 2^16, non-ZK), falling towards **0.3–0.4 MiB** after optimisation; zero-knowledge adds an estimated 40–80 %, to be measured. Verification takes a few milliseconds. No trusted setup; security rests only on the hash function.
 
 > [!NOTE]
 > **Why not keep KZG, or just keep plonkfri?**
@@ -133,6 +134,29 @@ The project's stated target, the industry norm used by ethSTARK, Plonky2 and Red
 >
 > KZG-based proofs could then be forged: Shor's algorithm recovers the trapdoor behind KZG's pairing-based commitments, so a prover could "open" a commitment to any value. Hash-based proofs have no such trapdoor. The known quantum speed-up is Grover-type search, which roughly halves the security bits of the Fiat–Shamir part; the parameters (queries, hash length) would be raised, not the design replaced.
 
+
+### 2.4 The same diagram, instantiated (a map, not a lesson)
+
+*Terms in this subsection are defined later; it is a map to come back to. §9 explains every number and how it constrains the others.*
+
+```mermaid
+flowchart LR
+    C["circuit + witness<br/>gnark SparseR1CS"] --> A["arithmetization<br/>n = 2^μ rows, bn254 field"]
+    A --> PIOP["PIOP: HyperPlonk<br/>degree-4 sumcheck + LogUp"]
+    PIOP -- "3 openings at one point" --> PCS["PCS: WHIR<br/>k = 4, ρ₀ = 1/8, Johnson"]
+    PCS --> FS["Fiat–Shamir<br/>SHA-256, 512-bit challenges"]
+    PIOP --> FS
+    FS --> PR["proof ≈ 0.5–0.6 MiB"]
+```
+
+| Box | One concrete choice | Where it is explained |
+|---|---|---|
+| circuit + witness | SparseR1CS from gnark's `scs` builder | §5.1 |
+| arithmetization | n = 2^μ rows over the bn254 scalar field (254-bit prime) | §5.1, §9.3.1 |
+| PIOP | one sumcheck of degree 4 plus LogUp, 14 evaluations | §5.2–5.4, §9.3.4 |
+| PCS | WHIR with folding factor 4 and initial rate 1/8 | §6, §9.3.3 |
+| Fiat–Shamir | SHA-256, 32-byte digests, 512 bits per challenge | §5.6, §9.3.2 |
+| proof | ≈ 0.53 MiB at 2^14 rows, ≈ 0.57 MiB at 2^16 (estimate) | §9.4 |
 
 ---
 
@@ -298,7 +322,7 @@ A **hash-based PCS** works in three steps:
 > [!NOTE]
 > **Why accept a list instead of a unique codeword?**
 >
-> Because queries are what we pay for, and each query in the Johnson regime is worth more: at rate 1/8 a query gives ≈ 1.43 bits instead of ≈ 0.83 bits, almost halving the number of Merkle paths in round 0. A short list (≈ 80–160 codewords here) costs only a union bound — a few bits taken from protocol terms that have more than 100 bits to spare (§8.2).
+> Because queries are what we pay for, and each query in the Johnson regime is worth more: at rate 1/8 a query gives ≈ 1.43 bits instead of ≈ 0.83 bits, almost halving the number of Merkle paths in round 0. A short list (≈ 80 codewords here) costs only a union bound — a few bits taken from protocol terms that have more than 100 bits to spare (§8.2).
 
 
 ---
@@ -526,7 +550,7 @@ All 14 claims concern the same point ρ. For each stack, the verifier draws a ra
 > [!NOTE]
 > **Why not commit every column in its own Merkle tree?**
 >
-> Because round 0 of each opening costs about 90 Merkle paths, and that cost is per *tree*, almost independent of the tree's size. Fourteen trees would mean fourteen times that; three stacked trees cost three times. And why a *random* τ rather than, say, summing the columns? A fixed combination would let a cheater lie by +1 in one column and −1 in another; random weights make such cancellations succeed only with probability ≈ 2/|F|.
+> Because round 0 of each opening costs about 91 Merkle paths, and that cost is per *tree*, almost independent of the tree's size. Fourteen trees would mean fourteen times that; three stacked trees cost three times. And why a *random* τ rather than, say, summing the columns? A fixed combination would let a cheater lie by +1 in one column and −1 in another; random weights make such cancellations succeed only with probability ≈ 2/|F|.
 
 
 The fourth slot of W and H holds the zero-knowledge masks (§7) and is zero in non-ZK mode. The linear form the PCS checks must give that slot weight 0, or touch it only through specific cells. This point was caught by the first independent review.
@@ -622,13 +646,13 @@ bn254's scalar field has 2-adicity 28 (its multiplicative group has a subgroup o
 
 We implement WHIR in the structure of 2026/391, which the reference implementation calls **zook** (the reason is in §6.5). Each round:
 1. **Sumcheck, k rounds**, on Σ_b v[b]·w[b] = σ, where w is the combined linear form. Each round folds one variable of v and w with a fresh random challenge. Round messages have degree 2.
-2. **Code switch.** The prover commits a new codeword: the folded table encoded on a domain half the size. Because the message shrank by 2^k but the domain only by 2, the rate falls by 2^{k−1} = 8 each round (1/8 → 1/64 → 1/512 …). Lower rate means each query catches more cheating, so later rounds need fewer queries (90 → 44 → 29 in our estimates).
+2. **Code switch.** The prover commits a new codeword: the folded table encoded on a domain half the size. Because the message shrank by 2^k but the domain only by 2, the rate falls by 2^{k−1} = 8 each round (1/8 → 1/64 → 1/512 …). Lower rate means each query catches more cheating, so later rounds need fewer queries (91 → 45 → 30, then 22 spot checks in the base case, at the 130 bits we use; 90 → 44 → 29 → 22 at 128 bits).
 3. **Out-of-domain (OOD) sample.** The verifier picks a random point outside the domain and the prover answers the new codeword's value there. With list decoding, this pins the new codeword down to one member of its list (WHIR Lemma 4.24/4.25).
 
 > [!NOTE]
 > **Why does one random evaluation pin down a list member?**
 >
-> The list holds at most L distinct low-degree polynomials (L ≈ 80–160 here). Two of them agree at a random point only with probability ≈ (degree)/|F|, so after the prover answers one random evaluation, at most one list member is consistent with that answer, except with probability ≈ L²·(degree)/|F| — negligible in a 254-bit field. From then on the protocol can reason as if the codeword were unique.
+> The list holds at most L distinct low-degree polynomials (L ≈ 80 here). Two of them agree at a random point only with probability ≈ (degree)/|F|, so after the prover answers one random evaluation, at most one list member is consistent with that answer, except with probability ≈ L²·(degree)/|F| — negligible in a 254-bit field. From then on the protocol can reason as if the codeword were unique.
 
 > [!TIP]
 > **What happens if the prover answers the OOD sample falsely?**
@@ -692,7 +716,7 @@ where δ_i is the proximity parameter for that round and z_i is optional *proof-
 
 
 - **Johnson-bound regime (default, decision D2).**
-  - δ = 1 − √ρ − η with η = √ρ/20. At ρ = 1/8 one query gives ≈ 1.43 bits, so round 0 needs about 90 queries for 128 bits.
+  - δ = 1 − √ρ − η with η = √ρ/20. At ρ = 1/8 one query gives ≈ 1.43 bits, so round 0 needs about 90 queries for 128 bits (91 at the 130 bits we use).
   - Its soundness proof needs *mutual correlated agreement up to Johnson*. The WHIR paper only conjectured this (Conj. 4.12). It is claimed proven by two Nov-2025 preprints, Bordage–Chiesa–Guan–Manzur (ePrint 2025/2051) and Haböck (ePrint 2025/2110), neither refereed yet.
   - Error constants: the reference code uses a linear-in-n constant built on ePrint 2025/2055 (whose Thm 1.5 proves ordinary correlated agreement; the *mutual* version is outlined there). The fully proven mutual bounds (2025/2051 Thm 9.2, 2025/2110 Thm 2) are quadratic in n and give ≈ 2^-191 — weaker, but in a 254-bit field still far below 2^-130, so only the query terms bind. Our independent checker uses the proven bound.
 - **Unique-decoding regime (selectable).** δ = (1 − ρ)/2, proven in the WHIR paper itself, but about 2.5–3× larger proofs.
@@ -728,15 +752,15 @@ Each of our three openings targets λ = 130 bits, so the union of three stays ab
 > [!NOTE]
 > **Why rate 1/8, when 1/2 would make the prover's FFTs four times smaller?**
 >
-> Because queries dominate the proof. At ρ = 1/2 in the Johnson regime one query gives only ≈ 0.43 bits, so round 0 needs about 298 queries instead of 90 — more than three times the Merkle paths. ρ = 1/8 trades a bigger encoding (prover time and memory) for a much smaller proof, the same trade plonkfri made.
+> Because queries dominate the proof. At ρ = 1/2 in the Johnson regime one query gives only ≈ 0.43 bits, so round 0 needs about 300 queries instead of about 90 at 128 bits — more than three times the Merkle paths. ρ = 1/8 trades a bigger encoding (prover time and memory) for a much smaller proof, the same trade plonkfri made.
 
 
-*Estimates* (k = 4, ρ = 1/8, Johnson, no Merkle-path compression): one opening at m = 16 ≈ 157 KiB, at m = 20 ≈ 200 KiB. Our openings are at m = μ + 3, μ + 2, μ + 2, giving ≈ 0.48–0.57 MiB per proof at 2^16 rows. Merkle multiproofs, a 16-bit proof-of-work, and opening W and H jointly could bring that to ≈ 0.3–0.4 MiB.
+*Estimates* (k = 4, ρ = 1/8, Johnson, no Merkle-path compression, λ = 128): one opening at m = 16 ≈ 176 KiB, at m = 20 ≈ 217 KiB, **including** the base-case spot checks (the 157 / 200 KiB quoted in the specs leave those out, which is about 11 % of an opening). Our openings are at m = μ + 3, μ + 2, μ + 2, giving ≈ 0.57 MiB per proof at 2^16 rows (0.51 without the base-case checks). Merkle multiproofs, a 16-bit proof-of-work, and opening W and H jointly could bring that to ≈ 0.3–0.4 MiB. §9.4 walks through the numbers for 2^14 and 2^16 rows.
 
 > [!NOTE]
 > **Why does the proof barely shrink for smaller circuits?**
 >
-> The number of round-0 queries depends only on the security level and the rate (≈ 90 for 130 bits at ρ = 1/8), not on the circuit size. A smaller circuit shortens each Merkle path by a few hashes and drops a round, but the dominant cost — about 90 paths per tree — stays. That is why the estimate at 2^14 rows (≈ 0.46–0.49 MiB) is close to the one at 2^16.
+> The number of round-0 queries depends only on the security level and the rate (≈ 91 for 130 bits at ρ = 1/8), not on the circuit size. A smaller circuit shortens each Merkle path by a few hashes and drops a round, but the dominant cost — about 91 paths per tree — stays. That is why the estimate at 2^14 rows (≈ 0.53 MiB) is close to the one at 2^16 (≈ 0.57 MiB).
 
 
 ### 6.5 Why the "zook" structure, not the original WHIR
@@ -756,7 +780,7 @@ If we built original WHIR first and the ZK variant later, the second would be a 
 > Proofs stay sound — Standard mode is the same protocol without the masks — but they leak information about the witness (round messages, w(ρ), opened codeword rows). The mode is part of the verifying key and its digest, so it cannot be switched silently per proof, and the Panurus integration rejects verifying keys whose mode is Standard (PLAN R13).
 
 
-One consequence: without commit-time OOD, the initial commitment in the Johnson regime binds the prover only to a *list* of up to about 10/ρ = 80 codewords (up to ≈ 160 when power-of-two rounding lowers the rate). §8.2 explains why that is harmless.
+One consequence: without commit-time OOD, the initial commitment in the Johnson regime binds the prover only to a *list* of up to about 10/ρ = 80 codewords (measured at the initial rate of the parameter-table row; power-of-two rounding in ZK mode can lower the effective rate slightly, and in later rounds far below nominal, but only the round-0 rate enters the union bound of §8.2). §8.2 explains why that is harmless.
 
 > [!NOTE]
 > **Why not add the commit-time OOD sample back in non-ZK mode?**
@@ -870,12 +894,12 @@ Two deliberate deviations from the reference implementation (pinned at commit `c
 > The cryptographic masks still hide it: every revealed value is shifted by fresh uniform randomness, so the proof is distributed the same way for amount 3 as for amount 97. The one place low entropy used to matter is the Merkle leaves — without salts, a verifier could test each of the 101 guesses against unopened leaves' hashes. The salts close that, and a dedicated test shows the guessing attack working without them and failing with them.
 
 
-**Cost.** Two extra small trees per round, each queried about 90 times. The estimated overhead is +40–80 % of total proof size, to be measured with the reference implementation before the WHIR code is written (gate G0).
+**Cost.** Two extra small trees per round, each queried about 68 times (the mask code has rate 1/16, so a query is worth more than in the main code: 68 queries in the Johnson regime, 143 in unique decoding). The estimated overhead is +40–80 % of total proof size, to be measured with the reference implementation before the WHIR code is written (gate G0).
 
 > [!NOTE]
 > **Why does ZK cost so much more than the PIOP masks suggest?**
 >
-> The PIOP masks are a few dozen field elements — negligible. WHIR's zero knowledge, in contrast, adds small committed mask trees in every round, and every tree has to be queried as often as the main one to reach the same security level. Queries, not field elements, are what proofs are made of, so each extra tree costs its own ~90 Merkle paths.
+> The PIOP masks are a few dozen field elements — negligible. WHIR's zero knowledge, in contrast, adds small committed mask trees in every round, and every tree has to be queried as often as the main one to reach the same security level. Queries, not field elements, are what proofs are made of, so each extra tree costs its own Merkle paths — about 68 per mask tree per round.
 
 
 ### 7.4 How ZK is tested
@@ -911,6 +935,8 @@ Two deliberate deviations from the reference implementation (pinned at commit `c
 
 ### 8.1 Soundness budget (n = 2^16)
 
+*How these terms interact with the other parameters of the system is the subject of §9.*
+
 | Source | Bound | Approx. |
 |---|---|---|
 | zerocheck point r | 4μ/\|F\| | 2^-247.6 |
@@ -921,19 +947,42 @@ Two deliberate deviations from the reference implementation (pinned at commit `c
 | Libra ρ_g, stacking τ | 1/\|F\| + 7/\|F\| | ≈ 2^-250.6 |
 | **each WHIR opening** | **2^-130 target** | **dominant** |
 
-The PIOP terms sit about 100 bits below the PCS terms: in a 254-bit field the algebra is essentially free, and the hash-based commitment sets the security level. The non-interactive version uses Fiat–Shamir. Every round is round-by-round sound (sumcheck rounds trivially; WHIR/zook by 2026/391 §2.1). An attacker making 2^128 hash queries gains at most about 2^-92 on the PIOP terms, even after the worst-case list loss below.
+The PIOP terms sit about 100 bits below the PCS terms: in a 254-bit field the algebra is essentially free, and the hash-based commitment sets the security level. The non-interactive version uses Fiat–Shamir. Every round is round-by-round sound (sumcheck rounds trivially; WHIR/zook by 2026/391 §2.1). An attacker making 2^128 hash queries gains at most about 2^-92 on the PIOP terms, even after the list loss below. What "128 bits" means precisely, including the hash-digest term, is spelled out in §8.1.1.
 
 > [!NOTE]
 > **Why is the security level set by the commitment and not by the algebra?**
 >
-> Every algebraic check fails with probability around (degree × size)/|F|, and |F| ≈ 2^254 makes that about 2^-234 or smaller. The commitment, in contrast, relies on random *queries* into a codeword, and each query only buys one or two bits; reaching 130 bits costs ~90 queries in round 0. So the cost of the whole proof is decided by how many bits we ask of the PCS — which is why every size discussion in this document is about WHIR parameters.
+> Every algebraic check fails with probability around (degree × size)/|F|, and |F| ≈ 2^254 makes that about 2^-234 or smaller. The commitment, in contrast, relies on random *queries* into a codeword, and each query only buys one or two bits; reaching 130 bits costs ~91 queries in round 0. So the cost of the whole proof is decided by how many bits we ask of the PCS — which is why every size discussion in this document is about WHIR parameters.
 
+
+### 8.1.1 What "128 bits" means
+
+The Fiat–Shamir compilation of a round-by-round sound protocol is secure in the random-oracle model with the following bound for an attacker making at most Q hash evaluations (Block et al., ePrint 2023/1071, Cor. 4.3/4.4; the same shape is used by ethSTARK, 2021/582):
+
+  ε_fs ≤ Q · ε_rbr + 3(Q² + 1) / 2^κ,
+
+where ε_rbr is the worst per-round error of the interactive protocol and κ the hash digest length. For us ε_rbr is dominated by the three WHIR openings, 3·2^-130 ≈ 2^-128.4 in total, and κ = 256 (SHA-256). Two terms, two thresholds:
+
+| success probability | max log₂ Q, query term (3·Q·2^-130) | max log₂ Q, digest term (3·Q²/2^256) |
+|---|---|---|
+| 1 | 128.4 | 127.2 |
+| 1/2 | 127.4 | 126.7 |
+| ≈ 1/5 | 126.0 | 126.0 |
+| 2^-10 | 118.4 | 122.2 |
+| 2^-20 | 108.4 | 117.2 |
+
+So "128-bit security" in this document is a **work-factor statement**: no attacker making fewer than about 2^120 hash evaluations succeeds with probability above ≈ 2^-8, and the best attack needs roughly 2^127 evaluations to reach a constant success probability. It is *not* "forgery probability ≤ 2^-128 for every attacker". Two consequences:
+- The digest sets a hard ceiling: with a 256-bit digest the collision term alone allows constant success near 2^127, whatever λ is. That is why 16-byte digests are excluded, and why SHA-256 is "enough for 128", not "comfortable".
+- For any success probability below ≈ 1/5 the **query term is the weaker one** (it allows fewer hash evaluations than the digest term, see the table), so the PCS parameters, not the digest, decide the security level in the regime that matters; only for near-constant success does the digest take over, at ≈ 2^127.
+- The per-opening target λ = 130 (rather than 128) is chosen because **three openings must all hold**: errors add, 3·2^-130 ≈ 2^-128.4, whereas 3·2^-128 ≈ 2^-126.4 would fall below the 128-bit mark. The price of the two extra bits is 0–1 query per round.
+
+Quantum adversaries are covered by the note in §2.3 (the bound degrades to Θ(Q·ε_fs), and collision search gains a further speed-up).
 
 ### 8.2 The list-decoding subtlety
 
-In the Johnson regime, a commitment to W (or H) is consistent with up to L ≈ 10/ρ polynomials — 80 at ρ = 1/8, up to ≈ 160 where power-of-two rounding lowers the actual rate. A cheater may effectively pick which one to "mean" after seeing later challenges. A union bound covers this:
+In the Johnson regime, a commitment to W (or H) is consistent with up to L ≈ 10/ρ polynomials, where ρ is the *initial* rate of the parameter-table row: 80 at ρ = 1/8 (slightly more in ZK mode if rounding lowers it). A cheater may effectively pick which one to "mean" after seeing later challenges. A union bound covers this:
 - PIOP steps before H is committed lose at most a factor L_W;
-- steps after it lose at most L_W·L_H ≤ 160² = 25 600, i.e. about 14.6 bits off 2^-234: harmless.
+- steps after it lose at most L_W·L_H ≈ 80² = 6 400, i.e. about 12.6 bits off 2^-234: harmless (even a list twice as long would cost under 15 bits).
 - With ZK encoding the argument still holds (the list lives in the masked code and projects to at most L messages).
 
 P is exempt for a different reason: an honestly generated P is an exact codeword, and other codewords are too far away to be on its list. That assumes the verifying key is honest. Setup is deterministic, so anyone can regenerate the key from the circuit and compare.
@@ -963,9 +1012,209 @@ P is exempt for a different reason: an honestly generated P is an exact codeword
 
 ---
 
-## 9. Engineering design
+## 9. The instantiated system: parameters and why they fit together
 
-### 9.1 Package layout
+Sections 5–8 explained each component on its own. This section puts them together. For every box of the diagram in §2 it states the **concrete choice and its parameter values**, and then shows how the parameters **constrain each other**: almost every number in the system was chosen for two components at once. Read it after §5–§8, or use it as a reference card.
+
+**Legend.** Every parameter carries a status. **D**: fixed by a project decision or requirement (`PLAN.md` §2, §4). **F**: derived by a formula from other parameters. **E**: an estimate, to be measured at a gate (G0 = parameter table and reference sizes, G1 = first full backend, G2 = ZK overhead). **O**: still open. The normative source is named in the tables; where this section and a normative document disagree, the normative document wins.
+
+### 9.1 The instantiated diagram
+
+```mermaid
+flowchart TB
+    subgraph SETUP["once per circuit (deterministic, transparent)"]
+      direction LR
+      FE["gnark front end<br/>scs.NewBuilder → SparseR1CS<br/>BSB22 rejected"] --> TAB["tables of n = 2^μ rows<br/>μ ≤ 17 (ZK: μ ≥ 5)<br/>bn254 scalar field"]
+      TAB --> VK["verifying key<br/>3 headers + root of P<br/>~1 KiB, versioned"]
+    end
+    subgraph PROVE["per proof"]
+      direction TB
+      W["commit W: 3 witness columns + mask slot<br/>m = μ+2, one Merkle tree"] --> B["β, γ (512-bit → field)"]
+      B --> H["commit H: LogUp helpers h₀..h₂<br/>m = μ+2"]
+      H --> SC["one sumcheck, μ rounds<br/>degree 4 (ZK round 1: 7)"]
+      SC --> EV["14 evaluations at one point ρ"]
+      EV --> OP["3 WHIR openings: P (μ+3), W, H (μ+2)<br/>k = 4, ρ₀ = 1/8, Johnson, 91/45/30/22 queries"]
+    end
+    VK -. "root(P)" .-> OP
+    FS["Fiat–Shamir: SHA-256 chain<br/>32-byte digests, HashID in the header<br/>λ = 130 per opening"] -.- PROVE
+    RNG["randomness: crypto/rand in ZK mode<br/>none in Standard mode"] -.-> PROVE
+    OP --> PROOF["proof ≈ 0.53 MiB (2^14 rows), 0.57 MiB (2^16)<br/>Standard mode, estimate"]
+```
+
+The diagram adds three boxes that the picture in §2 left out because they are easy to forget: the verifying key and the setup it comes from, the randomness source, and the frozen parameter table that every WHIR header points into (Table A, rows 11–12).
+
+### 9.2 Components and their parameters
+
+**Table A: one row per component.** "Defined in" says where the concept is explained.
+
+| # | Component | Instantiation | Status | Defined in | Normative |
+|---|---|---|---|---|---|
+| 1 | Front end and solver | gnark `scs.NewBuilder` → SparseR1CS; gnark solver returns the L, R, O columns; circuits with BSB22 commitments are rejected | D | §5.1 | SPEC-PIOP §1 |
+| 2 | Arithmetization | n = 2^μ rows: public placeholders, constraints, padding; μ ≥ 2 (ZK: μ ≥ 5); μ ≤ MaxLogSize = 17 | D / F | §5.1 | SPEC-PIOP §0 |
+| 3 | Field | bn254 scalar field: p ≈ 2^253.6, 2-adicity 28; one draw per challenge, no extension field | D | §4 | PLAN R2 |
+| 4 | PIOP | gate (degree 3) + LogUp permutation (3 helper columns) in one batched sumcheck of degree 4 (ZK round 1: 7); 14 evaluations at one point | D / F | §5.2–5.4 | SPEC-PIOP §2 |
+| 5 | Commitment layout | three stacked tables: P (8 columns, m = μ+3, built at setup), W and H (3 columns + one mask slot, m = μ+2); three WHIR openings | D | §5.5 | SPEC-PIOP §2.2, §2.4 |
+| 6 | PCS code | interleaved Reed–Solomon, folding factor k = 4 (16 chunks, a leaf = 16 field elements = 512 B), domain = subgroup in natural order, initial rate ρ₀ = 1/8 | D | §6.2 | SPEC-WHIR §1 |
+| 7 | PCS rounds and regime | rate falls 8× per round (1/8 → 1/64 → 1/512); Johnson regime by default (η = √ρ/20), unique decoding selectable; ≥ 1 OOD sample per round; proof-of-work 0; fold while ≥ 8 variables remain, base case ≤ 2^7 values | D / F | §6.3, §6.4 | SPEC-WHIR §1, §2 |
+| 8 | Security target | λ = 130 per opening, three openings; random-oracle model; 256-bit digest | D | §8.1.1 | PLAN R2 |
+| 9 | Hash, Merkle tree, transcript | SHA-256, 32-byte digests, domain-separated leaves and nodes; challenge = 512 bits reduced mod p; indices by bit-masking; `HashID` in every header | D | §3.3, §5.6 | SPEC-PIOP §3 |
+| 10 | Zero-knowledge layer | witness mask c·X₁(1−X₁); Libra mask (4μ+4 coefficients); mask block 4μ+7 cells; WHIR "zook" mode: two small mask trees per round, 68 queries each, salted leaves | D / E | §7 | SPEC-WHIR §3 |
+| 11 | Keys and encoding | deterministic transparent Setup; verifying key = three `pcs.Header`s + root(P) + version; proving key = tables + encoded P; magic + version, bounded lengths, canonical elements | D | §10.2 | PLAN R6, PANURUS §3 |
+| 12 | Parameter table and randomness | frozen generated table (`TableVersion` 1), row digest inside the verifying key; prover randomness from `crypto/rand` in ZK mode, none in Standard mode | D | §6.4, §7 | PLAN R12, SPEC-WHIR §4 |
+
+**Table B: the parameter card.** The last column says which cluster of §9.3 explains the value.
+
+| Parameter | Value | Status | Why (§9.3) |
+|---|---|---|---|
+| field | bn254 Fr, p ≈ 2^253.6 | D | 9.3.1 |
+| challenge derivation | 512 bits → field element (two squeezes) | D | 9.3.1 |
+| 2-adicity limit | m − k + log₂(1/ρ₀) ≤ 28, i.e. m ≤ 29 | F | 9.3.1 |
+| MaxLogSize | μ ≤ 17 (memory and decoder bound, not a field bound) | D | 9.3.1 |
+| hash, digest | SHA-256, κ = 256 bits (32 B) | D | 9.3.2 |
+| salt (ZK only) | 32 random bytes per Merkle leaf, every tree | D | 9.3.2 |
+| security per opening | λ = 130 (3 openings ⇒ 2^-128.4) | D | 9.3.3 |
+| initial rate | ρ₀ = 1/8 (log-inverse-rate 3) | D | 9.3.3 |
+| folding factor | k = 4 | D | 9.3.3 |
+| regime | Johnson (default), η = √ρ/20; unique decoding selectable | D | 9.3.3, 9.3.5 |
+| list size | L ≈ 10/ρ ≈ 80 at the round-0 rate | F | 9.3.3, 9.3.5 |
+| queries per phase | 91 / 45 / 30 / 22 (Johnson); 157 / 133 / 131 (unique decoding) | F, frozen at G0 | 9.3.3 |
+| OOD samples | s ≥ 1 per round | D | 9.3.5 |
+| proof-of-work | 0 in v1 (16 bits optional later; placement open) | O | 9.3.3 |
+| stack sizes | P: m = μ+3 (8 slots); W, H: m = μ+2 (4 slots) | D | 9.3.4 |
+| sumcheck degree | 4 (ZK round 1: 7) | F | 9.3.4 |
+| ZK floor | μ ≥ 5 (mask block 4μ+7 ≤ 2^μ) | F | 9.3.4 |
+| mask-code rate | 1/16, 68 queries per mask tree per round (Johnson) | D / E | 9.3.5 |
+| P commitment mode | always Standard (non-ZK) | D | 9.3.5 |
+| parameter table | frozen, versioned, row digest in the verifying key | D | 9.3.5 |
+
+### 9.3 How the parameters constrain each other
+
+Five clusters. In each, the numbered lines are the **forces**: a parameter chosen for one component that fixes or limits a parameter of another. Each force says what would break, or what it would cost, if the parameter were different.
+
+```mermaid
+flowchart LR
+    F["field p ≈ 2^254"] -->|"PIOP errors ≤ 2^-234"| LAM["PCS sets the security<br/>λ = 130 per opening"]
+    F -->|"p not a power of 2"| CH["512-bit challenges"]
+    F -->|"2-adicity 28"| DOM["domains ≤ 2^28<br/>m ≤ 29"]
+    LAM -->|"3 openings"| Q["queries per round"]
+    D["digest 256 bits"] -->|"collision term"| LAM
+    D --> PATH["Merkle path 32 B per level"]
+    RHO["rate ρ₀ = 1/8"] --> Q
+    K["folding factor k = 4"] --> RHO
+    K --> ROUNDS["rounds, leaf = 16 elements"]
+    Q --> SIZE["proof size"]
+    PATH --> SIZE
+    RHO --> MEM["encoded tables in memory"]
+    LOGUP["LogUp"] -->|"one opening point"| OPEN["3 openings, 3 trees"]
+    OPEN --> SIZE
+    OPEN --> STACK["stacking m = μ+3 / μ+2"]
+    STACK -->|"spare slot"| MASK["ZK masks 4μ+7 cells"]
+    MASK -->|"fit in 2^μ"| FLOOR["μ ≥ 5 in ZK"]
+    ZK["zero knowledge"] -->|"no commit-time OOD"| LIST["list L ≈ 80"]
+    JB["Johnson regime"] --> LIST
+    JB --> Q
+    LIST -->|"union bound"| LAM
+    DET["deterministic setup"] --> PMODE["P committed non-ZK"]
+    TBL["frozen table"] --> HDR["VK header + row digest"]
+```
+
+#### 9.3.1 Field and challenges
+
+1. **The field is far larger than the algebra needs, so the commitment sets the cost.** Every algebraic check fails with probability about (degree × size)/p. The worst one, LogUp, is 9n/p ≈ 2^-234 at n = 2^16 (§8.1), against 2^-130 for each WHIR opening. A 31- or 64-bit field would need challenges drawn from an extension field and several draws per challenge; here a single draw suffices. *Proven constraint*.
+2. **p is not a power of two, so challenges use 512 bits, but indices use plain masking.** Reducing a 256-bit hash mod p biases the result by about 4 % (2^256 ≈ 5.3·p); 512 bits brings the bias to 2^-258. Query indices, in contrast, are uniform by bit-masking *because* every codeword domain has a power-of-two size. That is one of the reasons the domains must be powers of two (see 9.3.5 for the other). *Proven constraint*.
+3. **2-adicity 28 bounds the table size, but MaxLogSize = 17 is the tighter limit.** A domain of 2^(m−k)/ρ₀ points needs m − k + log₂(1/ρ₀) ≤ 28, so m ≤ 29 (μ ≤ 26). The cap μ ≤ 17 is not about the field: it bounds memory (the encoded P alone is 256 MiB at μ = 17) and what a decoder may allocate from an untrusted header. *Proven bound; engineering cap*.
+
+> [!NOTE]
+> **Why is MaxLogSize 17 when the field would allow μ up to 26?**
+>
+> Because the limit is memory, not mathematics. The prover keeps the encoded table P (2^(μ+6) field elements: 32 MiB at μ = 14, 128 MiB at μ = 16, 256 MiB at μ = 17) in its proving key and builds W and H on top; doubling the circuit doubles all of it. The same constant also bounds what a verifying-key or proof header may make a decoder allocate, so a 50-byte input cannot request gigabytes. Raising it later means extending the parameter table and the decoder bounds, nothing deeper.
+
+#### 9.3.2 Hash and Merkle tree
+
+1. **A 256-bit digest caps the security at about 2^127 work, whatever λ is.** The Fiat–Shamir bound has a collision term 3(Q²+1)/2^κ (§8.1.1). With κ = 256 this reaches constant success near Q ≈ 2^127, so SHA-256 is "enough for 128 bits", not comfortable, and a 16-byte digest (64-bit collision security) is out of the question. *Proven constraint*.
+2. **The digest length fixes half the proof size.** A round-0 query at m = 16 opens a 512-byte leaf plus a 15-level path of 32-byte hashes: about 1 KB, of which the path is nearly half. With ≈ 91 such queries per tree, round 0 is about half of an opening (≈ 88 of 178 KiB). This is why Merkle multiproofs (shared upper nodes, milestone M4) are expected to save 20–30 %. In ZK mode every opened leaf also carries its 32-byte salt (about 3 % more per query). *Engineering trade-off*.
+3. **One hash for everything.** The same SHA-256 (`HashID` in each header) builds the Merkle trees and the Fiat–Shamir chain, so the verifying key states it once and the transcript binds it. A later switch to Poseidon2 (cheap inside a circuit, needed for recursion) changes the `HashID` and the parameter table, not the protocol. *Design choice*.
+
+> [!TIP]
+> **What happens if we used a 16-byte digest to halve the Merkle paths?**
+>
+> Paths would shrink from 15 × 32 B to 15 × 16 B and a proof by roughly a quarter, but collisions could then be found with about 2^64 work — a Merkle tree whose leaves can be swapped for others with the same hash binds the prover to nothing. The saving is paid for with the whole security of the commitment, which is why the digest length is a security parameter, not a tuning knob.
+
+#### 9.3.3 Code parameters: λ, ρ, k, regime, queries
+
+1. **λ = 130 per opening is set by the number of openings; the digest sets the ceiling.** Three openings must all hold, so their errors add: 3·2^-130 ≈ 2^-128.4, whereas 128 bits each would give 3·2^-128 ≈ 2^-126.4, below the 128-bit mark. The two extra bits cost 0–1 query per round. Note the interaction with 9.3.2: for small success probabilities the query term is the weaker term of the Fiat–Shamir bound, so these two bits really buy security there, while for near-constant success the 256-bit digest (≈ 2^127) is the limit and no λ can improve it (§8.1.1). *Engineering trade-off*.
+2. **The rate ρ₀ = 1/8 is a knee, not an optimum.** The query count falls as the rate falls (each query is worth 1.43 bits at 1/8, 1.93 at 1/16, only 0.43 at 1/2), but every halving of the rate doubles the encoded tables in the prover's memory. At m = 18 the model gives 419, 249, 192, 162, 142, 129 KiB for ρ₀ = 1/2 … 1/64 against 16 … 512 MiB for the encoded W. Going from 1/8 to 1/16 saves about 15 % of an opening for twice the memory, which the prover-memory target of `PLAN.md` §5 cannot afford at 2^16 rows. *Engineering trade-off; the sweep is a model, not a measurement*.
+3. **k = 4 balances rounds against leaf size; k and ρ₀ together fix the schedule.** Folding k variables per round shrinks the message by 2^k but the domain only by 2, so the rate falls by 2^(k−1) = 8 per round. A larger k means fewer rounds (fewer trees and OOD answers) but bigger leaves (2^k field elements per query): the model gives 260, 198, 192, 236, 361 KiB for k = 2 … 6, so k = 3 is within 3 % of k = 4. The rule "fold while ≥ 2k variables remain" also fixes the base case (≤ 2^7 values) and an edge case: in ZK mode the smallest circuit has μ = 5, so W has m = 7 < 2k and no code-switch round at all, only a base case. *Engineering trade-off; edge case recorded in the table*.
+4. **The Johnson regime cuts round-0 queries from 157 to 91 and costs a list.** It needs the (unrefereed) 2025 correlated-agreement results, pins a commitment only to a list of L ≈ 10/ρ ≈ 80 codewords (the union bound of 9.3.5), and needs at least one OOD sample per round. Unique decoding needs no such assumption but gives about 2.5–3× larger proofs; that is why it is selectable and recorded in each verifying key. *Proven cost; assumption recorded*.
+
+<p align="center"><img src="figures/param-sweep.svg" alt="Bars: proof size of one opening at m=18 for initial rates 1/2 to 1/64 with encoded memory, and for folding factors 2 to 6." width="860"></p>
+
+> [!NOTE]
+> **Why do the three openings use the same ρ₀ and k, instead of tuning each?**
+>
+> Because the parameter table is keyed by the opening's size m and a fixed (ρ₀, k), and every extra combination is one more row to generate, check against the security formulas and keep forever. The three openings differ only in m (μ+3, μ+2, μ+2); the gain from tuning each separately is a few percent, the cost is a larger frozen table and more cases in the tests.
+
+#### 9.3.4 The shape of the PIOP
+
+1. **The gate shape sets the sumcheck degree; the degree is nearly free.** A SparseR1CS gate has degree 3 (q_M·w₀·w₁); with the eq factor the sumcheck degree is 4, and LogUp's h·a·b term also has degree 4. Each round message is four field elements, in total about 2 KB, negligible next to the ≈ 560 KiB of queries. A higher-degree gate would be cheap for the PIOP too, but SparseR1CS fixes the shape: custom gates need a different front end (out of scope for v1). *Proven count; scope limit*.
+2. **LogUp trades one extra tree for a single opening point.** The paper's product check needs about five opening points on one extra table, some with boolean coordinates. LogUp costs the H tree but lets every column be opened at the same ρ. That has two consequences: three openings in total (no batch-evaluation sumcheck), and a witness mask c·X₁(1−X₁) with a single coefficient per column, which hides a value that is revealed once. *Design choice with two dependants*.
+3. **Stacking sets the table sizes, the mask slot and the ZK floor.** Round 0 of an opening costs about 91 Merkle paths *per tree*, almost independent of the tree's size, so three stacked trees (P, W, H) beat fourteen separate ones. W and H cannot be merged, because H depends on β, γ, which are derived from root(W). Four slots per tree (three columns + one) put W and H at m = μ+2; the spare slot carries the ZK masks at no extra tree. The mask block needs 4μ+7 cells, which fit into the 2^μ cells of a slot only from μ = 5 on (27 ≤ 32; at μ = 4, 23 > 16). *Proven constraint (the floor); engineering choice (the layout)*.
+
+> [!NOTE]
+> **Why four slots for W and H but eight for P?**
+>
+> W holds three witness columns (L, R, O) and H three helper columns; a power-of-two stack needs a fourth slot, which would be zero padding in the non-ZK case and carries the masks in ZK mode. P holds five selectors and three permutation columns, exactly eight, so it uses all slots and has no spare for masks — which is fine, because P is public and is never masked.
+
+#### 9.3.5 Modes and determinism
+
+1. **Zero knowledge forces the zook structure, which forces the list.** A random OOD sample at commit time would reveal an unmasked evaluation, so ZK moves OOD sampling into every code-switch round (answered through a private zero-evader). Without commit-time OOD the initial commitment pins only a list of ≈ 80 codewords; the PIOP error terms (≈ 2^-234) absorb the union bound (≈ 12.6 bits) and the extra OOD samples cost a few field elements per round. Because the rate that bounds the list is the **initial** rate of the table row, only round 0 enters the union bound. *Proven constraint*.
+2. **Setup must be deterministic, so P is always committed without ZK.** A ZK commitment needs fresh randomness, which would make the verifying key differ from run to run; Panurus stores keys in public parameters and every participant must be able to regenerate and compare them. P is public, so nothing is lost; the price is a trust statement: the verifying key must be reproducible from the circuit, and a verifier should regenerate it rather than accept an arbitrary one. Panurus accepts only ZK-mode W and H. *Design choice with a stated assumption*.
+3. **Prover and verifier must share every convention, and floating point must not enter.** The stack index is the *top* bits of a table index (slot bits most significant), the domain is a subgroup in natural order, bits are MSB-first: the PIOP's linear forms and the PCS's folding agree only if all of them follow `CONVENTIONS.md`. WHIR parameters come from a frozen, versioned table (derived offline with floating-point logarithms, checked by an independent security checker) and the verifying key carries the row digest, so a key made on one machine cannot be read differently on another. *Engineering necessity*.
+
+> [!TIP]
+> **What happens if someone edits a row of the parameter table without bumping `TableVersion`?**
+>
+> Proofs made before and after the edit would be generated under different parameters while carrying the same version number. The verifying key stores the *digest* of its full row, so keys made with the old row are rejected rather than silently verified under the new one — but proofs cannot tell. That is why rows are never edited in place: a change gets a new row or a new `TableVersion`, and a PR that changes a golden file has to say so.
+
+### 9.4 A worked instantiation
+
+All figures use the reference configuration (Johnson, ρ₀ = 1/8, k = 4, λ = 130, no proof-of-work, Standard mode) and the model in [`toy/param_model.py`](toy/param_model.py) (`python3 -I docs/hyperplonk-whir/toy/param_model.py`). **They are estimates** and will be replaced by the frozen table at gate G0.
+
+| | 2^14 rows (Panurus) | 2^16 rows (plonkfri comparison) |
+|---|---|---|
+| WHIR table sizes m (P, W, H) | 17, 16, 16 | 19, 18, 18 |
+| round layout, P | 17 → 13 → 9 → 5 | 19 → 15 → 11 → 7 |
+| round layout, W and H | 16 → 12 → 8 → 4 | 18 → 14 → 10 → 6 |
+| queries (rounds 0, 1, 2, base case) | 91, 45, 30, 22 | 91, 45, 30, 22 |
+| Merkle paths opened | 3 × 188 = 564 | 3 × 188 = 564 |
+| one opening (P / W, H) | 185 / 179 KiB | 200 / 192 KiB |
+| PIOP data (sumcheck messages, 14 evaluations, 2 roots) | 2.2 KiB | 2.5 KiB |
+| **whole proof** | **≈ 0.53 MiB** | **≈ 0.57 MiB** |
+| … without the base-case spot checks | 0.47 MiB | 0.51 MiB |
+| … with unique decoding instead | 1.52 MiB | 1.63 MiB |
+| encoded P (proving key) / W / H | 32 / 16 / 16 MiB | 128 / 64 / 64 MiB |
+| verifier hashing (path hashes + leaf blocks) | ≈ 13 000 SHA-256 compressions | ≈ 14 000 |
+
+How to read it:
+- **The proof barely depends on the circuit size** (0.53 vs 0.57 MiB for a 4× larger circuit): the ≈ 91 + 45 + 30 + 22 queries per opening are fixed by the security level and the rate (§9.3.3), and the circuit size only adds a hash to each path and, from time to time, a round.
+- **The base-case spot checks are ≈ 11 % of an opening.** The figures "157 / 200 KiB" in earlier drafts and in the specs leave them out; the table above includes them.
+- **Memory is dominated by the encoded P**, which lives in the proving key (a fixed 32 MiB at 2^14 and 128 MiB at 2^16, plus its Merkle tree). W and H are built per proof. At 2^16 rows P + W + H is 256 MiB, which makes the ≤ 300 MiB prover target of `PLAN.md` §5 tight; at the Panurus size (64 MiB) it is comfortable. To be re-checked at G1.
+- **Zero-knowledge mode** changes these figures structurally, not by a formula we trust yet: μ ≥ 5; sumcheck round 1 has degree 7; every opened leaf carries a 32-byte salt (≈ 3 % per query); each round adds two mask trees queried ≈ 68 times each; the main-code query count rises by about 1 in round 0 because power-of-two rounding lowers the effective rate; the base case is blinded. The estimated overhead is **+40–80 % of the whole proof (E)**, to be measured at G0/G2.
+
+### 9.5 What is still open
+
+- **Proof-of-work (O).** 0 in v1. The reference grinds *before* the OOD challenge; where our 16-bit option would go, and which security term it credits, is decided together with the multiproof work in milestone M4.
+- **Exact ZK query counts and sizes (E).** Mask-tree sizes follow the reference's hard-wired mask-code rate (1/16); the numbers above are structural. G0 replaces them with the reference implementation's real proof sizes in both modes.
+- **Power-of-two rounding in ZK mode (E).** It lowers the effective rate of later rounds far below nominal; that raises the query counts slightly and enlarges the lists of later rounds, which is harmless for the PIOP (only round 0 enters the union bound) but must show up in the frozen table.
+- **Prover memory (E).** The 300 MiB target at 2^16 rows (G1).
+- **Integration model with Panurus (O).** Decision D8 in `PLAN.md` §4.
+- **Other hashes and fields.** Poseidon2 (for an in-circuit verifier) and a small field with extension-field challenges are deliberately not part of v1; see §13 (risks) and the small-field note in §12.
+
+---
+
+## 10. Engineering design
+
+### 10.1 Package layout
 
 ```
 backend/hyperplonk/            dispatcher, shared circuit-suite test
@@ -992,7 +1241,7 @@ internal/whir/testdata/        Python and Rust reference harnesses and their out
 > gnark is pure Go, and so is Panurus; linking Rust through cgo would complicate every build, cross-compilation and audit. A future in-circuit verifier also has to be written against gnark's own API. The Rust implementation stays valuable as a *reference*: we run it in a container to cross-check parameters and test vectors, not in production.
 
 
-### 9.2 The public API
+### 10.2 The public API
 
 The API mirrors plonkfri after fork PR #9:
 - `Setup`, `Prove`, `Verify`;
@@ -1032,7 +1281,7 @@ A shared verifying key must be safe across goroutines: hashers are created per c
 > Rows are never edited in place: new parameter sets get new rows, and a change to an existing set gets a new `TableVersion`. Each verifying key stores its header and the digest of its full table row, so a key made with old parameters either still finds its row or is rejected — it is never silently verified under different parameters.
 
 
-### 9.3 Testing philosophy
+### 10.3 Testing philosophy
 
 Taken from plonkfri and made stricter by the reviews:
 - **Cheating-prover tests in three parts.** An attack test must:
@@ -1069,9 +1318,9 @@ Taken from plonkfri and made stricter by the reviews:
 
 ---
 
-## 10. How the work is organised
+## 11. How the work is organised
 
-### 10.1 Milestones
+### 11.1 Milestones
 
 | Milestone | What | Gate |
 |---|---|---|
@@ -1101,7 +1350,7 @@ All work happens on the feature branch `feature/hyperplonk`; each milestone is o
 > The coordinator stops and writes a gate report: the measurement, the estimate, and an explicit question for the project owner. Nothing proceeds until a decision is recorded. At gate G0, for example, a much larger zero-knowledge overhead than estimated could change the rate, the folding factor, the order of the optimisation work — or whether to continue at all.
 
 
-### 10.2 A team of agents
+### 11.2 A team of agents
 
 The work is executed by AI agents coordinated by one main session, the *coordinator*.
 - **Isolation and briefs.** Each agent owns one package, works in its own git worktree, and gets a written brief: goal, spec sections, owned files, required tests, out of scope, the lessons list, and the pinned reference commit.
@@ -1127,7 +1376,7 @@ The plan itself went through this: two independent design reviewers (each follow
 
 ---
 
-## 11. Integration into Panurus
+## 12. Integration into Panurus
 
 Panurus's `zkatsnark` driver selects a proof system per deployment. Each system implements a small Go interface:
 
@@ -1171,7 +1420,7 @@ The transfer circuits have about 2^14 rows, so that is the size we benchmark bes
 
 ---
 
-## 12. Risks and open questions
+## 13. Risks and open questions
 
 - **Proof size**: estimates could be off. Measured at G0/G1; Panurus limits can be raised.
 - **ZK overhead** is larger than first assumed (+40–80 % *estimate*); measured at G0 before the WHIR code is written.
@@ -1194,7 +1443,7 @@ The transfer circuits have about 2^14 rows, so that is the size we benchmark bes
 
 ---
 
-## 13. Glossary
+## 14. Glossary
 
 | Term | Meaning |
 |---|---|
@@ -1224,10 +1473,15 @@ The transfer circuits have about 2^14 rows, so that is the size we benchmark bes
 | SparseR1CS | gnark's PLONK-style constraint system |
 | BSB22 | gnark's in-circuit commitment feature (`api.Commit`), unsupported in v1 |
 | VK / PK | verifying key / proving key |
+| digest κ | length in bits of the hash output (256 for SHA-256); enters the Fiat–Shamir bound through the term 3(Q²+1)/2^κ (§8.1.1) |
+| work factor | number of hash evaluations an attacker needs for a constant success probability; what "128-bit security" means here (§8.1.1) |
+| instantiation | the concrete choice and parameter values of a component (§9) |
+| parameter table | frozen, versioned table of all derived WHIR parameters, one row per opening size; its digest is in the verifying key (§6.4, §9) |
+| status D / F / E / O | in §9: fixed by decision / derived by formula / estimate to be measured / open |
 
 ---
 
-## 14. References (annotated)
+## 15. References (annotated)
 
 All ePrint papers cited below are in `resources/` (committed with the docs at kick-off item K2). ePrint numbers are at https://eprint.iacr.org.
 
@@ -1274,7 +1528,7 @@ All ePrint papers cited below are in `resources/` (committed with the docs at ki
 
 ---
 
-## 15. Questions to test your understanding
+## 16. Questions to test your understanding
 
 *Hint: most questions can be explored by editing [`toy/toy_examples.py`](toy/toy_examples.py).*
 
@@ -1284,10 +1538,13 @@ All ePrint papers cited below are in `resources/` (committed with the docs at ki
 4. Why must the W opening's linear form give the mask slot weight 0 (or touch it only through specific cells)? What breaks in each direction?
 5. Why does WHIR's rate fall by a factor 2^{k−1} each round, and why does that reduce the number of queries?
 6. Explain why commit-time OOD sampling is incompatible with zero knowledge, and what the private zero-evader changes.
-7. In the Johnson regime a commitment binds only to a list of ≈ 80–160 polynomials. Why is the resulting loss tiny for the PIOP but would not be tiny if the field had 64 bits?
+7. In the Johnson regime a commitment binds only to a list of ≈ 80 polynomials. Why is the resulting loss tiny for the PIOP but would not be tiny if the field had 64 bits?
 8. Why can't zero knowledge be tested by checking that proof values "look random"? What do the rank tests check instead?
 9. Why is P committed in non-ZK mode, and what trust assumption does that create for the verifier?
 10. Why are WHIR parameters stored as a frozen table rather than computed at run time?
 11. In the running example, change the cheater so that it breaks only *one* copy (x = 4 in row 2 but v₂ = 12 still output in row 2). Which check rejects now — a gate or LogUp? Verify with the script.
 12. In the Reed–Solomon toy, how many queries are needed for 2^-20 if the cheater corrupts only 1 of 8 positions? Why does that not help a real cheater (hint: distance to the *nearest* codeword)?
 13. In the interleaved-RS toy, compute the folded leaf at x = 13 with α = 2 and check it against the encoding of P(2, ·).
+14. Using [`toy/param_model.py`](toy/param_model.py), find the folding factor k and initial rate ρ₀ that minimise one opening's size at m = 18 if prover memory is unlimited. Which of the two parameters buys more, and what does the answer cost in memory?
+15. Why does the 256-bit digest, and not the number of queries, limit the security level of the whole system to about 2^127 hash evaluations (§8.1.1)? Which parameter would you have to change to raise the ceiling, and which other components does that touch (§9.3.2)?
+16. Take the parameter card (§9.2, Table B) and pick three parameters. For each, name the *other* component that would break or become more expensive if the parameter were changed, and say whether the dependency is a proven constraint or an engineering trade-off.

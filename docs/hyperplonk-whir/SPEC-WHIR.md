@@ -50,11 +50,13 @@ Estimates (λ = 128 shown; λ = 130 adds 0–1 queries/round in JB (90/44/29/22 
 
 | Regime | ρ | m | t_i | size |
 |---|---|---|---|---|
-| JB | 1/8 | 16 | 90, 44, 29 | ≈157 KiB |
-| JB | 1/8 | 20 | 90, 44, 29, 22 | ≈200 KiB |
-| UD | 1/8 | 16/20 | 155, 131, 129, … | ≈392/573 KiB |
+| JB | 1/8 | 16 | 90, 44, 29 (+22 base-case checks) | ≈157 KiB without / **≈176 KiB with** the base-case checks |
+| JB | 1/8 | 20 | 90, 44, 29, 22 (+18 base-case checks) | ≈199 KiB without / **≈217 KiB with** |
+| UD | 1/8 | 16/20 | 155, 131, 129, … | ≈392/573 KiB (check whether these include the base case at G0) |
 
-**Per-proof estimate (to be replaced at G0)**: openings at m = μ+3 (P), μ+2 (W), μ+2 (H) → at 2^14: m = 17/16/16; at 2^16: m = 19/18/18. JB ρ = 1/8 ≈ 3 × 160–195 KiB ≈ **0.48–0.57 MiB at 2^16**, ≈ 0.46–0.49 MiB at 2^14 (round-0 queries dominate and barely shrink with m). After M4 (multiproof, 16-bit PoW, joint W+H): ≈ 0.3–0.4 MiB. **ZK overhead (unmeasured, estimate +40–80 % on the whole proof, ≈ +250–400 KiB over W and H)**: per ZK round a cs-mask tree (ℓ_zk ≈ 128 at the reference's fixed mask-code rate 2^-4 → ~2048 leaves, ~91 queries) and a sumcheck-mask tree (messages next_pow_2(mask_length) = 4 → ~64 leaves × 8 columns; reference does not deduplicate in-domain queries: ≈ 37 KiB, ≈ 8 KiB with dedup/multiproof), ~3 rounds + ZK base case. **Measured with the reference at G0** (RustRef prints real proof byte counts, both modes) and reported to the user before M1c.
+The base-case spot checks are ≈ 11 % of an opening and **are part of the proof**; the earlier figures 157 / 200 KiB leave them out (`toy/param_model.py` reproduces both).
+
+**Per-proof estimate (to be replaced at G0)**: openings at m = μ+3 (P), μ+2 (W), μ+2 (H) → at 2^14: m = 17/16/16; at 2^16: m = 19/18/18. JB ρ = 1/8, λ = 130, **including the base-case checks**: openings 185 / 179 / 179 KiB at 2^14 and 200 / 192 / 192 KiB at 2^16, plus 2.2 / 2.5 KiB of PIOP data ⇒ **≈ 0.53 MiB at 2^14 and ≈ 0.57 MiB at 2^16** (0.47 / 0.51 MiB without the base-case checks; unique decoding 1.52 / 1.63 MiB). Round-0 queries dominate and barely shrink with m (`toy/param_model.py`, a model, not a measurement). After M4 (multiproof, 16-bit PoW, joint W+H): ≈ 0.3–0.4 MiB. **ZK overhead (unmeasured, estimate +40–80 % on the whole proof, ≈ +250–400 KiB over W and H)**: per ZK round a cs-mask tree (ℓ_zk ≈ 128 at the reference's fixed mask-code rate 2^-4 → ~2048 leaves; the mask code uses the same λ and regime as the main code at rate 1/16, hence **68 queries per mask tree per round in JB (143 in UD)**, read from `params/irs_commit.rs::solve_mask_code`; mask proximity itself adds no queries) and a sumcheck-mask tree (messages next_pow_2(mask_length) = 4 → ~64 leaves × 8 columns; reference does not deduplicate in-domain queries: ≈ 37 KiB, ≈ 8 KiB with dedup/multiproof), ~3 rounds + ZK base case. **Measured with the reference at G0** (RustRef prints real proof byte counts, both modes) and reported to the user before M1c.
 **Default:** JB, ρ = 1/8, k = 4, s = 1, PoW 0 (16 in M4, placement and credited slot decided with a written note), reference layout rule; UD selectable. Grover halves the value of PoW bits (PQ note).
 
 ## 3. Zero knowledge (2026/391; port pinned `protocols/zook`)

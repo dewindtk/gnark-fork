@@ -98,7 +98,7 @@ Tests (the revealed values are **not** a linear function of all randomness — r
 | Libra ρ_g | 1/p | 2^-253.6 |
 | stacking τ | 7/p | 2^-250.8 |
 | LogUp a=b=0 at a σ fixed point (h unconstrained) | 3n/p | 2^-236.0 |
-| JB list-union: ×L_W on terms before H is committed (β, γ), ×L_W·L_H after; L ≤ 10/ρ′ with ρ′ the **actual** initial rate of the table row (also in ZK: the list in the masked code projects to ≤ L messages). ρ′ = ρ gives 80; power-of-two rounding (SPEC-WHIR §3) can lower ρ′ to ≈ ρ/2, i.e. L ≈ 160 | ≤ ×160² (worst case) | 2^-234.4·160² ≈ 2^-219.8 |
+| JB list-union: ×L_W on terms before H is committed (β, γ), ×L_W·L_H after; L ≤ 10/ρ′ with ρ′ the **actual round-0 rate** of the table row (also in ZK: the list in the masked code projects to ≤ L messages). ρ′ = ρ gives 80; power-of-two rounding (SPEC-WHIR §3) changes ρ′ only slightly in round 0 (≈ 78–80 at μ = 14, 16, per the coordinator's reimplementation; exact values come from the table at G0). **Later rounds' effective rates can fall far below nominal (lists ≫ 160) but do not enter this union bound**: it concerns only the committed oracle W or H | ≤ ×(10/ρ′)² | 2^-234.4·80² ≈ 2^-221.8 (≈ 2^-219.8 if L = 160) |
 | **WHIR per opening** | 2^-130 target each, 3 openings | **dominant: ≥ 128 bits total** |
 
 FS: RBR (knowledge) soundness per round (WHIR/zook proven RBR, 2026/391 §2.1; sumcheck rounds d_i/p); a Q = 2^128 hash-query attacker gains ≤ ~2^-92 on the PIOP terms (after the worst-case list-union loss); PCS rounds are set for λ = 130 each. Model: ROM for soundness and ZK (not QROM).
@@ -107,7 +107,7 @@ Cheater tests required (Adversary; R9 three-part form): forced σ fixed point wi
 
 ## 6. Cost estimate (2^16, unmeasured)
 
-Prover: commit W,H (2^18 cells each, RS at ρ=1/8, k=4), degree-4 sumcheck (~10M mul), 6n inversions, 3 openings → est. 0.5–1 s single-thread. Proof: 2 roots, ~2 KB sumcheck, ~0.5 KB evals, 3 WHIR openings at m = μ+3, μ+2, μ+2 ≈ 160–195 KiB each → **≈ 0.48–0.57 MiB at 2^16, ≈ 0.46–0.49 MiB at 2^14** (Standard mode); ≈ 0.3–0.4 MiB after M4. Replaced by `whirparams` at G0. Verifier ≈ 3–6 ms.
+Prover: commit W,H (2^18 cells each, RS at ρ=1/8, k=4), degree-4 sumcheck (~10M mul), 6n inversions, 3 openings → est. 0.5–1 s single-thread. Proof: 2 roots, ~2 KB sumcheck, ~0.5 KB evals, 3 WHIR openings at m = μ+3, μ+2, μ+2 ≈ 179–200 KiB each (incl. base-case checks) → **≈ 0.57 MiB at 2^16, ≈ 0.53 MiB at 2^14** (Standard mode, JB, λ = 130; 0.51 / 0.47 without base-case checks); ≈ 0.3–0.4 MiB after M4. Replaced by `whirparams` at G0. Verifier ≈ 3–6 ms.
 
 ## 7. API
 

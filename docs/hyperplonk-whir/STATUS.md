@@ -65,3 +65,5 @@ States: todo · ready · running · returned · in-review · merged · blocked �
 | 2026-10-30 | docs | review started | independent document review (gaps, references) on a frozen snapshot |
 | 2026-10-30 | docs | review returned | 49 findings; all accepted; D8 opened (panurus#2539 merged by vendoring) |
 | 2026-10-30 | K2, K6, K10 | done | user asked to commit and push; `feature/hyperplonk` created from `16a40bc2` and pushed: `cac2903e` (papers), `06ca7bd6` (docs) |
+| 2026-11-02 | docs | OVERVIEW §9 added | instantiation section + §2.4 teaser + §8.1.1; SPEC-WHIR §2, SPEC-PIOP §5/§6, PLAN §5 aligned (base-case checks, mask-tree queries, list-union at round-0 rate); `toy/param_model.py`, `figures/param-sweep.svg` |
+

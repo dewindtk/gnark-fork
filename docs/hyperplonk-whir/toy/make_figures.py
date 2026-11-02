@@ -398,7 +398,45 @@ def fig_mask():
     f.write()
 
 
+# ------------------------------------------------------- 8. rate / folding sweep
+def fig_sweep():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("pm", os.path.join(os.path.dirname(os.path.abspath(__file__)), "param_model.py"))
+    pm = importlib.util.module_from_spec(spec); spec.loader.exec_module(pm)
+    f = Fig("param-sweep.svg", 860, 380, "Proof size vs rate and folding factor (model)",
+            "Left: one opening at m=18 for initial rate 1/2..1/64 with prover memory; rho 1/8 is a knee. "
+            "Right: folding factors 2..6; k=3 and k=4 are within 3 percent. Model, not measurement.", 1, 10)
+    f.text(20, 28, "Why ρ₀ = 1/8 and k = 4: one opening at m = 18, λ = 130, Johnson (model — not a measurement)", "lg")
+    # left panel: rate
+    x0, y0, bw, gap, H = 70, 300, 44, 18, 200
+    data = [(r, pm.opening(18, log_inv_rho0=r)[0] / 1024, 2 ** 18 * 2 ** r * 32 / 2 ** 20) for r in (1, 2, 3, 4, 5, 6)]
+    vmax = 450
+    f.text(x0, 62, "initial rate ρ₀ (bar = proof size, KiB; label = encoded W, MiB)", "sm")
+    for i, (r, kb, mem) in enumerate(data):
+        x = x0 + i * (bw + gap); h = kb / vmax * H
+        hl = (r == 3)
+        f.add(f'<rect x="{x}" y="{y0-h}" width="{bw}" height="{h}" rx="4" fill="{"var(--s2)" if hl else "var(--s1)"}"/>')
+        f.text(x + bw / 2, y0 - h - 6, f"{kb:.0f}", "sm", "middle")
+        f.text(x + bw / 2, y0 + 16, f"1/{2**r}", "sm", "middle")
+        f.text(x + bw / 2, y0 + 32, f"{mem:.0f} MiB", "t2 sm", "middle")
+    f.add(f'<line x1="{x0-6}" y1="{y0}" x2="{x0+6*(bw+gap)}" y2="{y0}" stroke="var(--muted)"/>')
+    # right panel: k
+    x1 = 520; bw2, gap2 = 50, 14
+    f.text(x1, 62, "folding factor k (bar = proof size, KiB; ρ₀ = 1/8)", "sm")
+    kdata = [(k, pm.opening(18, k=k)) for k in range(2, 7)]
+    for i, (k, o) in enumerate(kdata):
+        x = x1 + i * (bw2 + gap2); kb = o[0] / 1024; h = kb / vmax * H
+        hl = (k == 4)
+        f.add(f'<rect x="{x}" y="{y0-h}" width="{bw2}" height="{h}" rx="4" fill="{"var(--s2)" if hl else "var(--s1)"}"/>')
+        f.text(x + bw2 / 2, y0 - h - 6, f"{kb:.0f}", "sm", "middle")
+        f.text(x + bw2 / 2, y0 + 16, f"k = {k}", "sm", "middle")
+        f.text(x + bw2 / 2, y0 + 32, f"{len(o[2])-1} rounds", "t2 sm", "middle")
+    f.add(f'<line x1="{x1-6}" y1="{y0}" x2="{x1+5*(bw2+gap2)}" y2="{y0}" stroke="var(--muted)"/>')
+    f.text(20, 366, "Smaller ρ₀ shrinks the proof but doubles the prover's memory each step; k trades fewer rounds against bigger leaves (16 elements at k = 4).", "t2 sm")
+    f.write()
+
+
 if __name__ == "__main__":
     os.makedirs(OUT, exist_ok=True)
-    for fn in (fig_mle, fig_sumcheck, fig_circuit, fig_rs, fig_irs, fig_whir, fig_mask):
+    for fn in (fig_mle, fig_sumcheck, fig_circuit, fig_rs, fig_irs, fig_whir, fig_mask, fig_sweep):
         fn()

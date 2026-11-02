@@ -108,7 +108,7 @@ At 2^14 rows (Panurus spend/output) and 2^16 (plonkfri reference point). Estimat
 | Prove 2^16, 1 core | 2.1 s | ≤ 2.5 s | ≤ 1.5 s | ≤ 1 s |
 | Memory / validation | 19 MB | ≤ 10 MB | ≤ 6 MB | ≤ 4 MB |
 | VK size | 172 B | ≤ 1 KiB | — | — |
-| Prover memory 2^16 (PK encoded P ≈ 128 MiB, W/H ≈ 64 MiB each) | measure | ≤ 300 MiB | ≤ 200 MiB | — |
+| Prover memory 2^16 (PK encoded P = 2^(μ+6) elements ≈ 128 MiB, W/H ≈ 64 MiB each, P+W+H = 256 MiB plus raw tables and Merkle trees) | measure; **tight** at 2^16 (target kept, re-check at G1); comfortable at 2^14 (64 MiB) | ≤ 300 MiB | ≤ 200 MiB | — |
 | PK in memory 2^14 | ~3 MiB serialized | measure | — | — |
 
 ## 6. Milestones

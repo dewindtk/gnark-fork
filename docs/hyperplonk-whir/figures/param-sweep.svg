@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 380" width="860" height="380" role="img" aria-labelledby="title desc">
+<title id="title">Proof size vs rate and folding factor (model)</title>
+<desc id="desc">Left: one opening at m=18 for initial rate 1/2..1/64 with prover memory; rho 1/8 is a knee. Right: folding factors 2..6; k=3 and k=4 are within 3 percent. Model, not measurement.</desc>
+<style>
+svg{--bg:#fcfcfb;--ink:#0b0b0b;--ink2:#52514e;--muted:#9a9993;--grid:#e4e3df;--cell:#f0efec;
+--s1:#2a78d6;--s2:#eb6834;--s3:#1baf7a;--bad:#d03b3b;--good:#0ca30c;--t1:rgba(42,120,214,.16);--t2:rgba(235,104,52,.16)}
+@media (prefers-color-scheme:dark){svg{--bg:#1a1a19;--ink:#f0efec;--ink2:#c3c2b7;--muted:#77766f;--grid:#383835;
+--cell:#262624;--s1:#3987e5;--s2:#d95926;--s3:#199e70;--bad:#e66767;--good:#0ca30c;--t1:rgba(57,135,229,.22);--t2:rgba(217,89,38,.22)}}
+text{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;font-size:13px;fill:var(--ink);
+font-variant-numeric:tabular-nums}
+.t2{fill:var(--ink2)} .sm{font-size:11.5px} .lg{font-size:15px;font-weight:600} .mono{font-family:ui-monospace,Menlo,Consolas,monospace}
+.cell{fill:var(--cell);stroke:var(--grid);stroke-width:1}
+.line{stroke:var(--muted);stroke-width:1.2;fill:none} .dash{stroke-dasharray:4 4}
+.rv,.tr{animation-iteration-count:infinite;animation-fill-mode:both;animation-timing-function:ease-in-out}
+.tr{opacity:0}
+@media (prefers-reduced-motion:reduce){svg .rv,svg .tr{animation:none!important}svg .rv{opacity:1}svg .tr{opacity:0}svg .keep{opacity:1}}
+</style>
+<defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker><marker id="arrA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--s1)"/></marker></defs>
+<rect width="100%" height="100%" rx="10" fill="var(--bg)"/>
+<text x="20" y="28" class="lg" text-anchor="start" >Why ρ₀ = 1/8 and k = 4: one opening at m = 18, λ = 130, Johnson (model — not a measurement)</text>
+<text x="70" y="62" class="sm" text-anchor="start" >initial rate ρ₀ (bar = proof size, KiB; label = encoded W, MiB)</text>
+<rect x="70" y="113.88888888888889" width="44" height="186.11111111111111" rx="4" fill="var(--s1)"/>
+<text x="92.0" y="107.88888888888889" class="sm" text-anchor="middle" >419</text>
+<text x="92.0" y="316" class="sm" text-anchor="middle" >1/2</text>
+<text x="92.0" y="332" class="t2 sm" text-anchor="middle" >16 MiB</text>
+<rect x="132" y="189.18055555555554" width="44" height="110.81944444444444" rx="4" fill="var(--s1)"/>
+<text x="154.0" y="183.18055555555554" class="sm" text-anchor="middle" >249</text>
+<text x="154.0" y="316" class="sm" text-anchor="middle" >1/4</text>
+<text x="154.0" y="332" class="t2 sm" text-anchor="middle" >32 MiB</text>
+<rect x="194" y="214.69444444444446" width="44" height="85.30555555555556" rx="4" fill="var(--s2)"/>
+<text x="216.0" y="208.69444444444446" class="sm" text-anchor="middle" >192</text>
+<text x="216.0" y="316" class="sm" text-anchor="middle" >1/8</text>
+<text x="216.0" y="332" class="t2 sm" text-anchor="middle" >64 MiB</text>
+<rect x="256" y="227.91666666666669" width="44" height="72.08333333333333" rx="4" fill="var(--s1)"/>
+<text x="278.0" y="221.91666666666669" class="sm" text-anchor="middle" >162</text>
+<text x="278.0" y="316" class="sm" text-anchor="middle" >1/16</text>
+<text x="278.0" y="332" class="t2 sm" text-anchor="middle" >128 MiB</text>
+<rect x="318" y="236.73611111111111" width="44" height="63.263888888888886" rx="4" fill="var(--s1)"/>
+<text x="340.0" y="230.73611111111111" class="sm" text-anchor="middle" >142</text>
+<text x="340.0" y="316" class="sm" text-anchor="middle" >1/32</text>
+<text x="340.0" y="332" class="t2 sm" text-anchor="middle" >256 MiB</text>
+<rect x="380" y="242.76388888888889" width="44" height="57.23611111111111" rx="4" fill="var(--s1)"/>
+<text x="402.0" y="236.76388888888889" class="sm" text-anchor="middle" >129</text>
+<text x="402.0" y="316" class="sm" text-anchor="middle" >1/64</text>
+<text x="402.0" y="332" class="t2 sm" text-anchor="middle" >512 MiB</text>
+<line x1="64" y1="300" x2="442" y2="300" stroke="var(--muted)"/>
+<text x="520" y="62" class="sm" text-anchor="start" >folding factor k (bar = proof size, KiB; ρ₀ = 1/8)</text>
+<rect x="520" y="184.40277777777777" width="50" height="115.59722222222221" rx="4" fill="var(--s1)"/>
+<text x="545.0" y="178.40277777777777" class="sm" text-anchor="middle" >260</text>
+<text x="545.0" y="316" class="sm" text-anchor="middle" >k = 2</text>
+<text x="545.0" y="332" class="t2 sm" text-anchor="middle" >8 rounds</text>
+<rect x="584" y="211.86111111111111" width="50" height="88.13888888888889" rx="4" fill="var(--s1)"/>
+<text x="609.0" y="205.86111111111111" class="sm" text-anchor="middle" >198</text>
+<text x="609.0" y="316" class="sm" text-anchor="middle" >k = 3</text>
+<text x="609.0" y="332" class="t2 sm" text-anchor="middle" >5 rounds</text>
+<rect x="648" y="214.69444444444446" width="50" height="85.30555555555556" rx="4" fill="var(--s2)"/>
+<text x="673.0" y="208.69444444444446" class="sm" text-anchor="middle" >192</text>
+<text x="673.0" y="316" class="sm" text-anchor="middle" >k = 4</text>
+<text x="673.0" y="332" class="t2 sm" text-anchor="middle" >3 rounds</text>
+<rect x="712" y="195.05555555555554" width="50" height="104.94444444444444" rx="4" fill="var(--s1)"/>
+<text x="737.0" y="189.05555555555554" class="sm" text-anchor="middle" >236</text>
+<text x="737.0" y="316" class="sm" text-anchor="middle" >k = 5</text>
+<text x="737.0" y="332" class="t2 sm" text-anchor="middle" >2 rounds</text>
+<rect x="776" y="139.38888888888889" width="50" height="160.61111111111111" rx="4" fill="var(--s1)"/>
+<text x="801.0" y="133.38888888888889" class="sm" text-anchor="middle" >361</text>
+<text x="801.0" y="316" class="sm" text-anchor="middle" >k = 6</text>
+<text x="801.0" y="332" class="t2 sm" text-anchor="middle" >2 rounds</text>
+<line x1="514" y1="300" x2="840" y2="300" stroke="var(--muted)"/>
+<text x="20" y="366" class="t2 sm" text-anchor="start" >Smaller ρ₀ shrinks the proof but doubles the prover's memory each step; k trades fewer rounds against bigger leaves (16 elements at k = 4).</text>
+</svg>
