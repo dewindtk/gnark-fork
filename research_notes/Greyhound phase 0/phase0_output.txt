@@ -1,0 +1,71 @@
+
+== 1. Splitting of X^d + 1 mod r
+log2 r = 253.597, v2(r-1) = 28
+d =   16: 16 distinct roots of X^d+1 found -> fully splits (k = d factors, each of norm r)
+d =   32: 32 distinct roots of X^d+1 found -> fully splits (k = d factors, each of norm r)
+d =   64: 64 distinct roots of X^d+1 found -> fully splits (k = d factors, each of norm r)
+d =  128: 128 distinct roots of X^d+1 found -> fully splits (k = d factors, each of norm r)
+
+== 2. Invertibility bound
+Claim (LS18, ePrint 2017/523, Cor. 1.2 specialised to k = d): if X^d+1 splits into k
+factors mod p, any y with 0 < ||y||_2 < p^(1/k) is invertible in Z_p[X]/(X^d+1).
+Re-derivation for k = d: if y is not invertible, y(w) = 0 mod p for some root w, so y lies
+in a prime ideal P of norm p, hence p | N(y) and N(y) != 0, so |N(y)| >= p. By AM-GM and
+||sigma(y)||_2^2 = d * ||y||_2^2 (power-of-two cyclotomic), |N(y)| <= ||y||_2^d. So
+||y||_2 >= p^(1/d). Infinity-norm form: ||y||_2 <= sqrt(d)*||y||_inf, giving
+||y||_inf < p^(1/d)/sqrt(d).
+p=   257 d=4: bound p^(1/d) =  4.004; shortest non-invertible ||y||_2 =  4.123 OK  e.g. y = (-4, -1, 0, 0)
+p=   257 d=8: bound p^(1/d) =  2.001; shortest non-invertible ||y||_2 =  2.236 OK  e.g. y = (-2, -1, 0, 0, 0, 0, 0, 0)
+p=    97 d=4: bound p^(1/d) =  3.138; shortest non-invertible ||y||_2 =  3.606 OK  e.g. y = (-3, -2, 0, 0)
+p=    17 d=8: bound p^(1/d) =  1.425; shortest non-invertible ||y||_2 =  1.732 OK  e.g. y = (-1, -1, 0, -1, 0, 0, 0, 0)
+p= 12289 d=4: bound p^(1/d) = 10.529; shortest non-invertible ||y||_2 = 10.536 OK  e.g. y = (-7, -6, 1, -5)
+
+bn254 r, fully split:
+d =   16: ||c-c'||_2 <   59055.88   ||c-c'||_inf <  14763.97
+d =   32: ||c-c'||_2 <     243.01   ||c-c'||_inf <     42.96
+d =   64: ||c-c'||_2 <      15.59   ||c-c'||_inf <      1.95
+d =  128: ||c-c'||_2 <       3.95   ||c-c'||_inf <      0.35
+
+== 3. Challenge sets at d = 32 with provably invertible differences
+Bound: ||c-c'||_2 < 243.0. LaBRADOR (ePrint 2022/1341) uses d = 64, |C| ~ 2^128, op-norm <= 15.
+ coeff range | log2|C| (uniform) | worst ||c-c'||_inf | worst ||c-c'||_2 | provable? | E||c||_2
+  [- 1, 1]   |              50.7 |                  2 |             11.3 | inf-norm  |    4.6
+  [- 2, 2]   |              74.3 |                  4 |             22.6 | inf-norm  |    8.0
+  [- 4, 4]   |             101.4 |                  8 |             45.3 | inf-norm  |   14.6
+  [- 6, 6]   |             118.4 |                 12 |             67.9 | inf-norm  |   21.2
+  [- 8, 8]   |             130.8 |                 16 |             90.5 | inf-norm  |   27.7
+  [-10,10]   |             140.6 |                 20 |            113.1 | inf-norm  |   34.3
+  [-12,12]   |             148.6 |                 24 |            135.8 | inf-norm  |   40.8
+  [-16,16]   |             161.4 |                 32 |            181.0 | inf-norm  |   53.9
+  [-21,21]   |             173.6 |                 42 |            237.6 | inf-norm  |   70.2
+Baseline, LaBRADOR d=64 set (31 x ±1, 10 x ±2): log2|C| = 128.1, ||c||_2 = sqrt(71) = 8.43
+
+Sparse sets bounded by l2 norm (differences have ||c-c'||_2 <= 2*||c||_2):
+  16 x ±1,  8 x ±2: log2|C| =   66.8, ||c||_2 =  6.93, diff bound  13.9 < 243: True
+  20 x ±1, 12 x ±2: log2|C| =   59.8, ||c||_2 =  8.25, diff bound  16.5 < 243: True
+  24 x ±1,  8 x ±2: log2|C| =   55.3, ||c||_2 =  7.48, diff bound  15.0 < 243: True
+  12 x ±1, 20 x ±2: log2|C| =   59.8, ||c||_2 =  9.59, diff bound  19.2 < 243: True
+  16 x ±1, 16 x ±2: log2|C| =   61.2, ||c||_2 =  8.94, diff bound  17.9 < 243: True
+
+== 4. Module-SIS security, core-SVP (ADPS16, ePrint 2015/1092)
+Model: BKZ-b on an m-column sublattice reaches length delta(b)^m * q^(n/m) (n = kappa*d rows);
+delta(b) from Chen (thesis 2013); cost 2^(0.292 b) classical [BDGL16], 2^(0.265 b) quantum [Laa15].
+Secure at bound beta iff the best length over m exceeds beta. Ignores l_inf, dimension-for-free and
+the full lattice-estimator; it is the methodology the Greyhound reference README quotes.
+128-bit quantum core-SVP -> b = 484, log2 delta = 0.00502
+Rows n*log2 q needed (bits per commitment), = (log2 beta)^2 / (4 log2 delta):
+ log2 beta | q=2^32,d=64: kappa (KB/commit) | q=r,d=32: kappa (KB/commit) | q=r,d=64: kappa
+    12    |    4 ( 1.00 KB)             |    1 ( 0.99 KB)             |    1 ( 1.98 KB)            
+    16    |    7 ( 1.75 KB)             |    2 ( 1.98 KB)             |    1 ( 1.98 KB)            
+    20    |   10 ( 2.50 KB)             |    3 ( 2.97 KB)             |    2 ( 3.96 KB)            
+    24    |   14 ( 3.50 KB)             |    4 ( 3.96 KB)             |    2 ( 3.96 KB)            
+    32    |    insecure (beta >= q)     |    7 ( 6.93 KB)             |    4 ( 7.92 KB)            
+    40    |    insecure (beta >= q)     |   10 ( 9.91 KB)             |    5 ( 9.91 KB)            
+    48    |    insecure (beta >= q)     |   15 (14.86 KB)             |    8 (15.85 KB)            
+    64    |    insecure (beta >= q)     |   26 (25.76 KB)             |   13 (25.76 KB)            
+
+== 5. Operator norm of challenges at d = 32 (max_j |c(w_j)| over complex roots of X^d+1)
+  uniform [-8,8]  (2^130.8): median   50.0, 99th pct   74.1, max   93.2
+  uniform [-4,4]  (2^101.4): median   26.3, 99th pct   38.7, max   50.3
+  sparse 16x±1,8x±2 (2^66.8): median   12.5, 99th pct   17.5, max   21.7
+  LaBRADOR d=64 set: ||c||_2 = sqrt(71) ~ 8.4, rejection-sampled to op-norm <= 15 (2022/1341).
