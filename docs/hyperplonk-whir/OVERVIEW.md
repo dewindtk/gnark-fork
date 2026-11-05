@@ -488,7 +488,7 @@ The verifier can evaluate PI at any point in time O(2^⌈log₂ℓ⌉ + μ), i.e
 
 PLONK proves copy constraints with a *grand product* Π (γ + w + β·id)/(γ + w + β·σ) = 1. HyperPlonk's multilinear version (§3.3–3.5 of the paper) needs an extra polynomial over μ + 1 variables that is opened at about five different points, some with boolean coordinates. With a hash-based PCS every opening point costs proof size, and the boolean points break the simple masking used for zero knowledge.
 
-We use the **logarithmic derivative ("LogUp")** technique (Haböck, ePrint 2022/1530) instead. Write a_j = γ + w_j + β·id_j and b_j = γ + w_j + β·σ_j.
+We use the **logarithmic derivative ("LogUp")** technique (Haböck, ePrint 2022/1530) instead. A full, student-level treatment is in [`LOGUP.md`](LOGUP.md). Write a_j = γ + w_j + β·id_j and b_j = γ + w_j + β·σ_j.
 - **The idea.** The multisets {(w, id)} and {(w, σ)} are equal exactly when every variable's value is consistent across its copies. With β, each pair is compressed into one field element. With a random γ, equality of the multisets {a} and {b} is equivalent, except with negligible probability, to Σ 1/a = Σ 1/b. A sum of fractions (a *rational function* identity in γ) has low degree in γ, so Schwartz–Zippel applies.
 
 > [!TIP]
