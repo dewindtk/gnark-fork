@@ -5,7 +5,7 @@ Normative for the PIOP agent. Source: HyperPlonk, ePrint 2022/1355 (§3.1–3.5,
 ## 0. Notation
 
 F = bn254 fr, p ≈ 2^253.6. ℓ = |spr.Public|, ν = ⌈log2 ℓ⌉, n_rows = ℓ + nbConstraints, μ = max(2, ⌈log2 n_rows⌉) in Standard mode and **μ = max(5, ⌈log2 n_rows⌉) in ZK mode** (the W mask block needs 4μ + 7 cells in slot 3; μ = 5 → 27 ≤ 32; H needs only 3 cells; Setup asserts the fit), n = 2^μ.
-Indexing is **0-based** everywhere: columns w_0,w_1,w_2, h_0..h_2, masks c_0..c_2, slots ⟨0⟩..⟨3⟩.
+Indexing is **0-based** except as listed in §1: columns w_0,w_1,w_2, h_0..h_2, masks c_0..c_2, slots ⟨0⟩..⟨3⟩.
 ℓ = 0 is allowed: then ν is undefined, PI ≡ 0, and no public rows exist.
 Hypercube order follows gnark-crypto `polynomial.MultiLin`: index i = Σ_k 2^{μ−k} b_k (X_1 = MSB; `Fold` binds X_1 first). eq(x,y) = Π (x_k y_k + (1−x_k)(1−y_k)) (`polynomial.EvalEq`, `MultiLin.Eq`).
 Stacking: columns c_0..c_{2^s−1} (μ vars) → C(Y,X) on s+μ vars, table = c_0‖c_1‖…, slot bits Y most significant; Σ_j eq(τ,⟨j⟩)·c_j(ρ) = C(τ,ρ).
@@ -17,7 +17,7 @@ Row layout identical to `backend/plonkfri/bn254/setup.go`. `buildPermutation` is
 - rows ℓ..ℓ+nbConstraints−1: from `spr.GetSparseR1CIterator()`, selectors `spr.Coefficients[c.QL]` etc., wires (XA, XB, XC);
 - padding rows: selectors 0, wires = wire 0 (solver convention, `padToDomain`).
 
-MLEs: q_L,q_R,q_O,q_M,q_C; σ_j(⟨i⟩) = Permutation[j·n + i] as field element (j = 0,1,2); w_0,w_1,w_2 = MLE(solution.L,R,O); id_j(X) = j·n + Σ_k 2^{μ−k} X_k (linear, never committed). Variables are 1-based X_1..X_μ with X_1 = MSB — the only 1-based index.
+MLEs: q_L,q_R,q_O,q_M,q_C; σ_j(⟨i⟩) = Permutation[j·n + i] as field element (j = 0,1,2); w_0,w_1,w_2 = MLE(solution.L,R,O); id_j(X) = j·n + Σ_k 2^{μ−k} X_k (linear, never committed). Variables are 1-based X_1..X_μ with X_1 = MSB. The only 1-based indices: variables X_k, the zerocheck point r_k, sumcheck rounds i (s_i, ρ_i, d_i) and Libra pieces g_i (k, i = 1..μ); the Libra constant g_0 is the 0th coefficient, not a round.
 
 Public input: PI(X) = Σ_{i<ℓ} pub_i·eq(⟨i⟩_μ, X). The verifier first checks len(pub) = ℓ and that every pub_i is canonical (< p), then computes PI(ρ) = Π_{k≤μ−ν}(1−ρ_k) · Σ_i pub_i·eq(⟨i⟩_ν, ρ_{μ−ν+1..μ}) in O(2^ν + μ).
 Gate: f(X) = q_L w_0 + q_R w_1 + q_O w_2 + q_M w_0 w_1 + q_C + PI(X) (degree 3). Row i < ℓ gives −w_0 + pub_i = 0.
@@ -53,11 +53,11 @@ Completeness test with non-zero M_W required. No BatchEval sumcheck. Joint W+H o
 ## 3. Fiat–Shamir schedule (single `transcript.go`)
 
 sha256 hash chain with labels and indexed challenges (`internal/fs`). Exact construction:
-- state S₀ = sha256("gnark-hyperplonk-whir-bn254/v1"); `Absorb(label, data)`: S ← sha256(S ‖ 0x01 ‖ len(label) ‖ label ‖ len(data) ‖ data) (lengths as u32 big-endian);
-- `ChallengeField(label, i)`: u₀ = sha256(S ‖ 0x02 ‖ len(label) ‖ label ‖ u32(i) ‖ 0x00), u₁ = same with 0x01; c = (u₀‖u₁ as 512-bit big-endian) mod p; then S ← sha256(S ‖ 0x03 ‖ u₀ ‖ u₁);
-- `ChallengeIndices(label, count, logDomain)`: per index one 32-byte block as above, masked to logDomain bits;
+- state S₀ = sha256("gnark-hyperplonk-whir-bn254/v1"); `Absorb(label, data)`: S ← sha256(S ‖ 0x01 ‖ u32(len(label)) ‖ label ‖ u32(len(data)) ‖ data) (u32 = 4-byte big-endian);
+- `ChallengeField(label, i)`: u₀ = sha256(S ‖ 0x02 ‖ u32(len(label)) ‖ label ‖ u32(i) ‖ 0x00), u₁ = same with 0x01; c = (u₀‖u₁ as 512-bit big-endian) mod p; then S ← sha256(S ‖ 0x03 ‖ u₀ ‖ u₁);
+- `ChallengeIndices(label, count, logDomain)`: exact formula below;
 - `PoW(bits)`: nonce n with leading `bits` zero bits of sha256(S ‖ 0x04 ‖ u64(n)); verifier checks then absorbs n.
-Field elements are absorbed as canonical 32-byte big-endian; the domain tag is S₀ only (step 1 below is that initialisation, not a second absorb); `ChallengeIndices(label, count, logDomain)`: block_j = sha256(S ‖ 0x02 ‖ u32(len label) ‖ label ‖ u32(j) ‖ 0x00) for j = 0..count−1; idx_j = BE(block_j) & (2^logDomain − 1); then S ← sha256(S ‖ 0x03 ‖ block_0 ‖ … ‖ block_{count−1}). In `ChallengeField(label, i)`, i is the resampling counter (0 unless resampling). Every named scalar has its own label (`beta`, `gamma`, `alpha`, `r/<k>`, `rho_g`, `tauP/<k>`, …). PoW label `"pow"`. VK and header digests: byte layout in FS-GRAMMAR.md §digests. `MaxLogSize = 17` (Panurus circuits are 2^14; same cap as plonkfri). **M0 deliverable: `FS-GRAMMAR.md` (byte-level grammar) with a test vector, before fs/pyref are written.** Roots are absorbed by the PIOP schedule (steps 4–5), never inside `whir.Commit`. The outer transcript and the PCS share this transcript and `HashID`. `backend.WithProverChallengeHashFunction`/`WithVerifierChallengeHashFunction`: probe the given `hash.Hash` on a fixed test vector against the VK `HashID` (probe a clone if the hash implements one; otherwise document that the option's instance must not be shared across goroutines); mismatch → error (PLAN R10).
+Field elements are absorbed as canonical 32-byte big-endian; a list of field elements is absorbed as one data field, their 32-byte encodings concatenated in the listed order; the domain tag is S₀ only (step 1 below is that initialisation, not a second absorb); `ChallengeIndices(label, count, logDomain)`: block_j = sha256(S ‖ 0x02 ‖ u32(len(label)) ‖ label ‖ u32(j) ‖ 0x00) for j = 0..count−1; idx_j = BE(block_j) & (2^logDomain − 1); then S ← sha256(S ‖ 0x03 ‖ block_0 ‖ … ‖ block_{count−1}). ChallengeField and ChallengeIndices labels must be disjoint; ChallengeIndices is never resampled. In `ChallengeField(label, i)`, i is the resampling counter only (0 unless resampling, used only for `rho_g`); it is never a vector or round index. Every named scalar has its own label; vector components and rounds put the index in the label as decimal ASCII, no padding, equal to the subscript used in this spec (`beta`, `gamma`, `alpha`, `r/<k>` with k = 1..μ, `rho_g`, `sc/chal/<i>` with i = 1..μ, `tauP/<k>` with k = 0..2, `tauW/<k>`, `tauH/<k>` with k = 0..1, …). PoW label `"pow"`. VK and header digests: byte layout in FS-GRAMMAR.md §digests. `MaxLogSize = 17` (Panurus circuits are 2^14; same cap as plonkfri). **M0 deliverable: `FS-GRAMMAR.md` (byte-level grammar) with a test vector, before fs/pyref are written.** Roots are absorbed by the PIOP schedule (root(P) in step 2 via the VK digest, root(W) and root(H) in steps 4–5), never inside `whir.Commit`. The outer transcript and the PCS share this transcript and `HashID`. `backend.WithProverChallengeHashFunction`/`WithVerifierChallengeHashFunction`: probe the given `hash.Hash` on a fixed test vector against the VK `HashID` (probe a clone if the hash implements one; otherwise document that the option's instance must not be shared across goroutines); mismatch → error (PLAN R10).
 1. domain tag `"gnark-hyperplonk-whir-bn254/v1"`;
 2. vk.Digest(): format version, μ, ℓ, the canonical `pcs.Header` of P/W/H (incl. TableVersion, NumVars, regime, ρ, k, PoW, λ, mode, hashID) and each header's table-row digest (FS-GRAMMAR §digests), root(P);
 3. ℓ and pub_0..pub_{ℓ−1};
@@ -150,7 +150,7 @@ type Round1Hook interface {                    // ZK only (§4)
 }
 type Proof struct{ Rounds [][]fr.Element } // evals at 0,2..d_i
 func Prove(t *fs.Transcript, claim fr.Element, cols []polynomial.MultiLin, c Composition, h Round1Hook /* nil in Standard */) (proof Proof, rho []fr.Element, finalEvals []fr.Element)
-// Labels: Absorb("sc/round/<i>", s_i(0),s_i(2..d)); ChallengeField("sc/chal", i). The claim is not absorbed (the caller binds it).
+// Labels: Absorb("sc/round/<i>", s_i(0)‖s_i(2..d_i)); ρ_i = ChallengeField("sc/chal/<i>", 0), i = 1..μ. The claim is not absorbed (the caller binds it).
 func Verify(t *fs.Transcript, claim fr.Element, degrees []int, p Proof) (rho []fr.Element, finalClaim fr.Element, err error)
 ```
 

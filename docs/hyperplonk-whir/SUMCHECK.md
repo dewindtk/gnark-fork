@@ -478,7 +478,7 @@ flowchart TB
 
 A SNARK proof is a single message, so the verifier's random challenges are replaced by hashes of the transcript (Fiat–Shamir). For the sumcheck (SPEC-PIOP §3, step 6, and §7):
 
-  ρ_i = ChallengeField("sc/chal", i) after Absorb("sc/round/<i>", s_i(0), s_i(2..d_i)).
+  ρ_i = ChallengeField("sc/chal/<i>", 0) after Absorb("sc/round/<i>", s_i(0) ‖ s_i(2..d_i)).
 
 Each absorb mixes the message into a running SHA-256 state, and each challenge is derived from that state. So ρ_i depends on every message sent so far, in particular on s_i. *[script §7]* shows the mechanics in the toy field. It is a toy: it binds S as a caller would, reduces modulo 97 and has no length prefixes, so it is not the FS-GRAMMAR of SPEC-PIOP §3.
 
@@ -495,7 +495,7 @@ Each absorb mixes the message into a running SHA-256 state, and each challenge i
 > [!NOTE]
 > **Why does every round have its own label?**
 >
-> So that no two absorbs can be confused; the absorb label `sc/round/<i>` carries the round index. Unambiguous parsing comes from the length-prefixed grammar of SPEC-PIOP §3 (see the OVERVIEW §5.6 tip on length prefixes).
+> So that no two absorbs or challenges can be confused; both labels, `sc/round/<i>` and `sc/chal/<i>`, carry the round index (the second argument of `ChallengeField` is reserved for resampling). Unambiguous parsing comes from the length-prefixed grammar of SPEC-PIOP §3 (see the OVERVIEW §5.6 tip on length prefixes).
 
 > [!TIP]
 > **What happens if the challenge is reduced from 256 hash bits instead of 512?**
