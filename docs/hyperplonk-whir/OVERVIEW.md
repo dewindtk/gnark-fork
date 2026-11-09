@@ -216,6 +216,8 @@ Why multilinear? The main tool for checking "this holds on every row", the **sum
 
 **Goal.** Prove S = Σ_{x∈{0,1}^μ} F(x) for a polynomial F of degree ≤ d in each variable, while the verifier evaluates F only once.
 
+A full, student-level treatment (soundness, the linear-time prover, zerocheck, batching, Fiat–Shamir, zero knowledge) is in [`SUMCHECK.md`](SUMCHECK.md).
+
 **Round i**, for i = 1..μ:
 1. The prover sends the univariate polynomial s_i(t) = Σ over the remaining boolean variables of F(r_1,…,r_{i−1}, t, x_{i+1},…,x_μ).
 2. The verifier checks s_i(0) + s_i(1) = current claim.
@@ -960,7 +962,7 @@ Each round message then contains fresh random coefficients from g, so the messag
 > [!NOTE]
 > **Why mask the sumcheck if the witness columns are already masked?**
 >
-> The witness masks only help where X₁ ∉ {0,1}. The round messages are *sums over the hypercube* of products of witness values, and in every round after the first those sums no longer involve the mask at all — they are aggregated functions of the real witness. Adding ρ_g·g with fresh random coefficients makes each round message uniformly random apart from the one relation the verifier checks, which is what a simulator needs.
+> The witness masks only help where X₁ ∉ {0,1}. The round messages are *sums over the hypercube* of products of witness values, and in every round after the first those sums no longer involve the mask at all — they are aggregated functions of the real witness. Even in round 1, s₁(0) and s₁(1) are untouched, because the mask vanishes at X₁ ∈ {0, 1}. Adding ρ_g·g with fresh random coefficients makes each round message uniformly random apart from the one relation the verifier checks, which is what a simulator needs.
 
 > [!TIP]
 > **What happens if the prover reuses its randomness across proofs?**
