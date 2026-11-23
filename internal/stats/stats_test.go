@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/consensys/gnark/backend"
 	"github.com/stretchr/testify/require"
 )
 
@@ -27,7 +26,7 @@ func TestCircuitStatistics(t *testing.T) {
 			return
 		}
 		for _, curve := range c.Curves {
-			for _, b := range backend.Implemented() {
+			for _, b := range Backends() {
 				curve := curve
 				backendID := b
 				name := name

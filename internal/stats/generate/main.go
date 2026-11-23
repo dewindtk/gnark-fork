@@ -9,7 +9,6 @@ import (
 	"regexp"
 	"sync"
 
-	"github.com/consensys/gnark/backend"
 	"github.com/consensys/gnark/internal/stats"
 )
 
@@ -41,7 +40,7 @@ func main() {
 		go func(name string, circuit stats.Circuit) {
 			defer wg.Done()
 			for _, curve := range circuit.Curves {
-				for _, backendID := range backend.Implemented() {
+				for _, backendID := range stats.Backends() {
 					cs, err := stats.NewSnippetStats(curve, backendID, circuit.Circuit)
 					if err != nil {
 						log.Fatalf("building stats for circuit %s %v", name, err)

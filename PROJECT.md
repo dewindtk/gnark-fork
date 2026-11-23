@@ -33,7 +33,7 @@ Reference papers, all in `resources/` (committed):
 - **Milestone scope**: native (out-of-circuit) backend only. No in-circuit verifier / recursion in v1.
 - **Hash**: sha256 (matches the vendored `internal/nativefri` and old `backend/plonkfri` as-is). Poseidon2 swap deferred to when an in-circuit verifier is built.
 - **FRI security**: rate ρ=1/8 (`rho = 8`), **86 queries = 128-bit proven** soundness (Johnson bound). See "Security status".
-- **Security target** (decided 2026-10-07): **128-bit classical, "plausibly post-quantum"** — option (a) in "Post-quantum target" below; the industry norm (ethSTARK, Plonky2, RedShift). Quantum estimate ≈64 bits (Grover-type loss on Fiat-Shamir). Explicit PQ target (b)/(c) revisited after reading [CMS19] + NIST PQC criteria; it changes parameters (queries, hash, field), not the fix B/C design.
+- **Security target**: **128-bit classical, "plausibly post-quantum"** — option (a) in "Post-quantum target" below; the industry norm (ethSTARK, Plonky2, RedShift). Quantum estimate ≈64 bits (Grover-type loss on Fiat-Shamir). Explicit PQ target (b)/(c) revisited after reading [CMS19] + NIST PQC criteria; it changes parameters (queries, hash, field), not the fix B/C design.
 
 ## Plan
 
@@ -161,7 +161,7 @@ Replay Fiat-Shamir from the proof's published roots + public inputs to get `beta
 
 ## Security status (current state — read before using or extending plonkfri)
 
-**Sound (fix B) and zero-knowledge (fix C), as of 2026-10-07 — not externally reviewed.** All known forgeries are rejected (attack tests: 0/800, 0/200, 0/50); the values a verifier sees are uniformly random by HK24 Lemma 1/2/4, checked structurally by `TestRevealedValuesAreUniform`. ZK is honest-verifier in the IOP, NIZK after Fiat-Shamir (random-oracle model). Unreviewed research code: do not rely on it for real secrets. Details, measurements and reasoning are in the 2026-10-07 session-log entries below.
+**Sound (fix B) and zero-knowledge (fix C) — not externally reviewed.** All known forgeries are rejected (attack tests: 0/800, 0/200, 0/50); the values a verifier sees are uniformly random by HK24 Lemma 1/2/4, checked structurally by `TestRevealedValuesAreUniform`. ZK is honest-verifier in the IOP, NIZK after Fiat-Shamir (random-oracle model). Unreviewed research code: do not rely on it for real secrets. Details, measurements and reasoning are in the session-log entries below.
 
 A FRI-PLONK proof rests on two promises: (1) every committed table is a low-degree polynomial — FRI's job; (2) those polynomials satisfy the circuit identity, checked at one random point `zeta` — PLONK's job. Soundness is the *weakest* of the checks, so every one must reach the target.
 
@@ -169,16 +169,16 @@ A FRI-PLONK proof rests on two promises: (1) every committed table is a low-degr
 |---|---|---|---|---|
 | 1 | FRI checked **1 query** per proof (`nbRounds = 1`) | FRI (`internal/nativefri`) — all 18 commitments | Garbage accepted ~1/8 → ~3 bits; e.g. a pointwise `H = F/Z_H` table passes PLONK at every `zeta`, only FRI could catch it | ✅ Fixed (A): fold once, **86 queries** = 128-bit proven (Johnson bound, ρ=1/8, `s = 2λ/log₂(1/ρ)`) |
 | 4 | `VerifyOpening` never tied `ClaimedValue` to the Merkle-authenticated leaf | FRI opening ↔ PLONK final check | Cheater claims any value at `zeta` (solve for `h`) → forgery with probability 1 | ✅ Fixed (A): `ErrClaimedValue` |
-| 2 | `zeta` drawn from the 16n-point FRI domain, not the whole field | PLONK final check (`prove.go`/`verify.go`) | Schwartz–Zippel escape up to ~19%; 1/16 of positions put `zeta` in the circuit domain (`Z_H(zeta)=0`) → honest low-degree polys for a witness breaking one gate pass ~1/16. **Measured 2026-10-07** (`attack_test.go`, red until fix B): false statement "X²=5" (5 is a non-square) accepted **36/800 = 4.5%**, all with ζ ∈ H; predicted 1/16·(n−1)/n = 4.69% for n=4 | ✅ Fixed (B): `zeta ∈ F \ (D' ∪ H)`, all values opened by one batched DEEP-FRI. Same attack after B: **0/800** accepted (all rejected by the identity check); solving `h1(zeta)` from the identity and opening the lie: **0/200** (all rejected by FRI folding) |
+| 2 | `zeta` drawn from the 16n-point FRI domain, not the whole field | PLONK final check (`prove.go`/`verify.go`) | Schwartz–Zippel escape up to ~19%; 1/16 of positions put `zeta` in the circuit domain (`Z_H(zeta)=0`) → honest low-degree polys for a witness breaking one gate pass ~1/16. **Measured** (`attack_test.go`, red until fix B): false statement "X²=5" (5 is a non-square) accepted **36/800 = 4.5%**, all with ζ ∈ H; predicted 1/16·(n−1)/n = 4.69% for n=4 | ✅ Fixed (B): `zeta ∈ F \ (D' ∪ H)`, all values opened by one batched DEEP-FRI. Same attack after B: **0/800** accepted (all rejected by the identity check); solving `h1(zeta)` from the identity and opening the lie: **0/200** (all rejected by FRI folding) |
 | 3 | Blinding (2 coeffs L/R/O, 3 for Z) vs values revealed by queries + openings | PLONK prover blinding (`prove.go`) | Zero-knowledge (privacy) only, not soundness; with 86 queries it clearly leaks | ✅ Fixed (C): l/r/o/z blinded with 174 random coefficients, h1/h2/h3 split randomized (173), mask R in every FRI opening. `TestRevealedValuesAreUniform`: full rank on all revealed points (was rank 2–3 vs ~160 points) |
-| 5 | FRI domain is a subgroup ⊇ circuit domain H (no coset shift) | FRI domain (`nativefri.newRadixTwoFri`) | ZK only: queries landing in H (1/16) reveal raw wire values, blinding vanishes there. **Measured 2026-10-07:** 60-secret-wire circuit, one proof → L/R/O each reveal 172 codeword values, of which 9/5/11 are raw secret wire values (expected 172/16≈11) | ✅ Fixed (B): FRI on coset `a·D`; regression test: 0 of 516 revealed values are secret wire values |
+| 5 | FRI domain is a subgroup ⊇ circuit domain H (no coset shift) | FRI domain (`nativefri.newRadixTwoFri`) | ZK only: queries landing in H (1/16) reveal raw wire values, blinding vanishes there. **Measured:** 60-secret-wire circuit, one proof → L/R/O each reveal 172 codeword values, of which 9/5/11 are raw secret wire values (expected 172/16≈11) | ✅ Fixed (B): FRI on coset `a·D`; regression test: 0 of 516 revealed values are secret wire values |
 | 6 | Transcript doesn't bind the verifying key / circuit | Fiat-Shamir in `prove.go`/`verify.go` | "Weak Fiat-Shamir" class [DMWG23]; matters if the VK can be chosen adversarially | ✅ Fixed (B): VK digest + public inputs bound first; the batched opening's transcript also binds every root and claim |
 
-Parameter choice (decided 2026-10-07): **proven** 128-bit, not conjectured. Rationale: once FRI folds once, query count costs only proof size/verify time, not prover time (RedShift §6–7), and the proven regime keeps knowledge-soundness extractable. Conjectured alternative (43 queries, ~half the size) remains an opt-in for later. Sources: `resources/2020-654.pdf` §3.2/§8 (2λ/log(1/ρ) proven for q ≫ n²; λ/log(1/ρ) conjectured), `resources/2019-1400.pdf` Table 1, `resources/Revision2OfTR17-134.pdf` Thm 3.3 / Conj. 1.5.
+Parameter choice: **proven** 128-bit, not conjectured. Rationale: once FRI folds once, query count costs only proof size/verify time, not prover time (RedShift §6–7), and the proven regime keeps knowledge-soundness extractable. Conjectured alternative (43 queries, ~half the size) remains an opt-in for later. Sources: `resources/2020-654.pdf` §3.2/§8 (2λ/log(1/ρ) proven for q ≫ n²; λ/log(1/ρ) conjectured), `resources/2019-1400.pdf` Table 1, `resources/Revision2OfTR17-134.pdf` Thm 3.3 / Conj. 1.5.
 
 Lessons that generalize: (a) passing honest-proof tests says nothing about soundness — every check needs a test that a *cheating* prover is rejected; (b) any value the verifier uses must be bound to something it verified (here: `ClaimedValue` ↔ leaf, `ID` ↔ `Roots[0]`, layer sizes computed not trusted); (c) measure acceptance rates empirically — the 1/8 measurement exposed concern 1 before the theory did. From fix B: (d) write the attack test *before* the fix and check its measured rate against a prediction (36/800 vs 4.69% predicted) — a match confirms the cause, not just a correlation; (e) record *which* check rejects each cheater: the in-domain-zeta forgery is caught by the identity check, the lie-at-zeta by FRI folding, so each defence is shown to do its own job (tampering with transcript inputs is caught indirectly — query positions move — and does not test folding); (f) anything prover and verifier must agree on (claim order → batching coefficients, transcript order) comes from one shared function, not two copies; (g) estimate before measuring (0.9 MB estimated, 0.84 MB measured) so surprises are visible. From fix C: (h) privacy can't be tested by sampling (every 254-bit value looks random) — test the structural condition the proof relies on (full rank of the blinding map on the revealed points), red first; (i) demonstrate a design rule by showing the attack it prevents succeeding without it (crafted mask: 50/50 unsafe vs 0/50), and make the test fail if the attack stops working, so it can't become vacuous; (j) re-derive a formula on the *old* parameters and match the old code before using it with new ones (piece size n+2 ✓ → n+231); (k) when a struct gains a field, check every copy helper (mask `clone()` bug); (l) to measure old behaviour, use a `git worktree` at the old commit, not `git stash`.
 
-## Literature basis for the security plan (checked 2026-10-07)
+## Literature basis for the security plan
 
 Every planned protocol change maps to a specific, published construction in `resources/`. Engineering-only steps (Step 0, serialization, Merkle internals) need no paper.
 
@@ -193,7 +193,7 @@ Every planned protocol change maps to a specific, published construction in `res
 | Fix C: blinding degree | `2019-1400` Appendix D.3 (ZK proof), §5 remark | Mask `Z(X)·Hᵢ(X)` with deg Hᵢ ≥ \|Kᵢ\| = number of points where fᵢ is revealed; sampling y outside D gives *perfect* ZK |
 | Fiat-Shamir safety of the whole thing | `2019-1400` Thm 7 (round-by-round knowledge soundness) | RBR soundness is what makes the non-interactive (hashed) version sound |
 
-Added to `resources/` 2026-10-07: `2021-582` (ethSTARK Documentation v1.2), `2022-1216` (Haböck, A summary on the FRI low degree test, Dec 2024 rev.), `2023-1071` (Block et al., Fiat-Shamir Security of FRI and Related SNARKs).
+Added to `resources/`: `2021-582` (ethSTARK Documentation v1.2), `2022-1216` (Haböck, A summary on the FRI low degree test, Dec 2024 rev.), `2023-1071` (Block et al., Fiat-Shamir Security of FRI and Related SNARKs).
 
 | Change / question | Source | What it says |
 |---|---|---|
@@ -212,7 +212,7 @@ Added to `resources/` 2026-10-07: `2021-582` (ethSTARK Documentation v1.2), `202
 5. **Setup-polynomial binding (RedShift §4.3 PES)** — likely moot for us: setup is deterministic and the VK roots are re-derivable from the circuit, so committed setup words are exact codewords; distinct codewords are ≥ 1−ρ = 0.875 apart > δ ≤ 1−√ρ ≈ 0.646, so no other polynomial is δ-close. **Resolved in B1 (D9):** no PES needed; preprocessed oracle is checked by every batched FRI.
 6. **Query sampling** `H(seed‖j) mod |D|` with |D| a power of two is unbiased; sampling with replacement matches the analysis. No change.
 
-### Post-quantum target — what the literature gives us (checked 2026-10-07)
+### Post-quantum target — what the literature gives us
 
 Only `2023-1071` (Block et al.) states quantum bounds; every other paper says "plausibly post-quantum" and cites **[CMS19]** (Chiesa–Manohar–Spooner, *Succinct Arguments in the Quantum Random Oracle Model*, TCC 2019) for the underlying theorem. `2023-1071` Thm 3.15 (from [BCS16, CMS19, COS20]):
 - classical: `ε_fs = Q·ε_rbr + 3(Q²+1)/2^κ`
@@ -234,20 +234,22 @@ Sources to obtain/verify (not yet in `resources/`, IDs from memory): [CMS19] ePr
 
 ## Open questions / next steps
 
-Done: Phase 0–2 (restore, compile, shared circuit suite 30/30); security fix A (86-query FRI, opening/ID binding) — PRs #1–#3 merged 2026-10-07.
+**Current work: HyperPlonk + WHIR backend.** Documentation: `docs/hyperplonk/` (README = scope and verification policy, THEORY = claims ledger with paper sections and status, PLAN = decisions and milestones M0–M6). Branch `hyperplonk-whir` (local; nothing is pushed until there is more progress). Scope: implement `backend/hyperplonk` (HyperPlonk PIOP, ePrint 2022/1355, with WHIR, ePrint 2024/1586) and support it with theory checked against the papers. Panurus is out of scope; D8 = vendoring. A. De Caro's `docs/hyperplonk-whir/` on `feature/hyperplonk` is left unchanged and not merged. Next: user confirms open decisions D2 (regime), D3 (wiring identity), D4 (openings), D7 (ρ, k) in `docs/hyperplonk/PLAN.md`; then M0 (read proofs, hand example of one WHIR round). The plonkfri follow-ups below (F1, F4–F10) are parked.
 
-**Step 0 — `master` red → done 2026-10-07 (stopgap).** `std/commitments/fri/fri_test.go` (in-circuit gadget, PR #2) builds native proofs with `nativefri` and stopped compiling after fix A changed the proof format. Missed at PR #2 resolution because only textual conflicts were checked, not compilation of the merged result — always compile/test the *combined* tree (`go build ./... && go test -run XXX ./...` compiles every test package).
+Done: Phase 0–2 (restore, compile, shared circuit suite 30/30); security fix A (86-query FRI, opening/ID binding) — PRs #1–#3 merged.
+
+**Step 0 — `master` red → done (stopgap).** `std/commitments/fri/fri_test.go` (in-circuit gadget, PR #2) builds native proofs with `nativefri` and stopped compiling after fix A changed the proof format. Missed at PR #2 resolution because only textual conflicts were checked, not compilation of the merged result — always compile/test the *combined* tree (`go build ./... && go test -run XXX ./...` compiles every test package).
 - Why not just reshape the proof in the test: the gadget and nativefri now disagree on *which positions are queried* (gadget: `seed mod |D|`, one query; nativefri: `H(seed‖j) mod |D|`, 86 queries), not only on the struct layout → a real port, i.e. Phase 3 work.
 - Done: test gated behind build tag `fri_gadget_phase3` with a TODO header explaining the mismatch. `go test -tags fri_gadget_phase3 ./std/commitments/fri/` still reproduces the breakage. Port it in Phase 3 (one commit phase, s queries, H(seed‖j) positions in MiMC, root/ID binding), then drop the tag.
 
 **Step 1 — Fix B: out-of-domain `zeta` (DEEP), coset domain, batched opening, VK binding. Blocks "sound".**
-**✅ Done 2026-10-07** (B1 design → B4 red test → B2 → B3).
-- B1 design: **approved 2026-10-07 — see "Fix B design (B1)" below.** Covers considerations 1, 3, 5 (coset domain, VK digest, setup binding).
-- **B4 red test written first (2026-10-07):** `TestForgeryZetaInDomain` — fails today (36/800 forgeries accepted), must pass (0) after B3. Branch stays unmerged until then.
-- **B2 done (2026-10-07):** `internal/nativefri/batch.go` (`Scheme`, `Commit`, `Open`, `Verify`) + `batch_test.go`, alongside the old API (removed in B3). 
+**✅ Done** (B1 design → B4 red test → B2 → B3).
+- B1 design: **approved — see "Fix B design (B1)" below.** Covers considerations 1, 3, 5 (coset domain, VK digest, setup binding).
+- **B4 red test written first:** `TestForgeryZetaInDomain` — fails today (36/800 forgeries accepted), must pass (0) after B3. Branch stays unmerged until then.
+- **B2 done:** `internal/nativefri/batch.go` (`Scheme`, `Commit`, `Open`, `Verify`) + `batch_test.go`, alongside the old API (removed in B3). 
 - **B3 done:** setup/prove/verify on `Scheme`; old per-polynomial `nativefri` API removed. B4 tests: in-domain-zeta forgery 0/800, lie-at-zeta 0/200, witness-leak 0/516.
 
-**Step 2 — Fix C: zero-knowledge. C1 design drafted 2026-10-07 — see "Fix C design (C1)" below; decisions 1–3 approved (173, mask always on, larger tiny proofs). C2 red test written 2026-10-07 (`zk_test.go`, fails as intended). C3 done (mask R in nativefri). C4 done (blinding + randomized split; `TestRevealedValuesAreUniform` green). C5 done. ✅ Fix C complete.** Original note: Also add a separate random blinding polynomial to the FRI batch (consideration 2, [HK24]). After B the exact count is known: each committed poly is revealed at ~2·86 FRI positions + its `zeta` openings → blinding degree must be ≥ that; FRI degree bound/domain sizing must absorb it. RedShift samples outside D for perfect ZK — check §6.
+**Step 2 — Fix C: zero-knowledge. C1 design drafted — see "Fix C design (C1)" below; decisions 1–3 approved (173, mask always on, larger tiny proofs). C2 red test written (`zk_test.go`, fails as intended). C3 done (mask R in nativefri). C4 done (blinding + randomized split; `TestRevealedValuesAreUniform` green). C5 done. ✅ Fix C complete.** Original note: Also add a separate random blinding polynomial to the FRI batch (consideration 2, [HK24]). After B the exact count is known: each committed poly is revealed at ~2·86 FRI positions + its `zeta` openings → blinding degree must be ≥ that; FRI degree bound/domain sizing must absorb it. RedShift samples outside D for perfect ZK — check §6.
 
 **Decided — security target (consideration 4):** option (a), classical 128 bits + "plausibly PQ" (see Design decisions). To revisit: explicit PQ target after reading [CMS19] / Chiesa–Yogev / NIST PQC criteria; optional grinding to trade queries for prover work.
 
@@ -255,7 +257,7 @@ Done: Phase 0–2 (restore, compile, shared circuit suite 30/30); security fix A
 
 **After "sound + ZK"** → see **"Follow-ups (after fixes A–C)"** below (F1–F12, prioritized).
 
-**Next steps (decided order, 2026-10-07)** — all of fixes A–C are merged (PRs #1–#7); master is green.
+**Next steps (decided order)** — all of fixes A–C are merged (PRs #1–#7); master is green.
 1. **F3 concurrency** (small, concrete): `nativefri.Scheme` takes a hash constructor; red-first test = parallel Prove/Verify on one VK under `go test -race`.
 2. **F2 serialization** (needed for any real use): `WriteTo`/`ReadFrom` for Proof and VK with canonical decoding; round-trip test, size = `proofSize`, fuzz test that never panics.
 3. **F4 malicious-prover harness**: consolidate the existing cheating hooks into one helper; add the missing cheaters (pointwise-H, broken copy constraint, wrong z(ω·ζ), wrong public row, swapped h pieces) — each 0/N with the rejecting check recorded.
@@ -263,9 +265,9 @@ Done: Phase 0–2 (restore, compile, shared circuit suite 30/30); security fix A
 5. Then cost (F6 size, F7 prover time — profile first), F9 PQ-target reading, F10 Phase 3.
 - In parallel, outside the code: **F1 external review** — PROJECT.md (designs B1/C1, security table, lessons) + the attack/ZK tests are the claims to hand over.
 
-**Development paused 2026-10-07** for a supervisor presentation. Resume at item 1 (F3). Presentation deck (decisions, arguments, benchmarks): https://claude.ai/artifact/PWgnNpgaFTsa8dXZqFtcZP
+**Development paused** for a supervisor presentation. Resume at item 1 (F3). Presentation deck (decisions, arguments, benchmarks): https://claude.ai/artifact/PWgnNpgaFTsa8dXZqFtcZP
 
-## Follow-ups (after fixes A–C) — recorded 2026-10-07
+## Follow-ups (after fixes A–C)
 
 Status at this point: plonkfri on bn254 is sound (fix A + B) and honest-verifier zero-knowledge (fix C) by construction, with a test per mechanism; **not externally reviewed**. Items are grouped by when they matter; within a group, roughly by priority. Each has a "done when" so it can be worked test-first like A–C.
 
@@ -301,7 +303,7 @@ Status at this point: plonkfri on bn254 is sound (fix A + B) and honest-verifier
 | F11 | **Features:** BSB22 commitments (`api.Commit`), more curves | `commit`, `gkr_cube` circuits are skipped (`ErrCommitmentsUnsupported`); only bn254. | Commitments need an extra committed polynomial + transcript binding; curves are copy/codegen of `bn254`. | Suite runs those circuits; other curves pass the suite. |
 | F12 | **Housekeeping:** `internal/stats/generate/main.go` | Manual stats tool doesn't know `PLONKFRI` (noted in Phase 0; non-blocking, not part of tests). | Teach it plonkfri or skip it explicitly. | `go run ./internal/stats/generate` works. |
 
-## Fix B design (B1) — approved 2026-10-07
+## Fix B design (B1)
 
 ### B.0 The problem, in one paragraph
 PLONK reduces "the witness satisfies the circuit" to one polynomial identity, checked at one random point `zeta`. That check is only convincing if `zeta` is unpredictable among *all* field elements (Schwartz–Zippel: two different degree-d polynomials agree on ≤ d points out of |F| ≈ 2^254). Today `zeta = GenOpening^position` is one of only 16n FRI-domain points, because our opening mechanism (`VerifyOpening` = a Merkle path) can only reveal values the prover already wrote down — i.e. points of D. So the bad-point fraction is ~d/16n instead of ~d/2^254, and 1/16 of the time `zeta ∈ H` where `Z_H(zeta)=0` makes the check vacuous (concern 2). No parameter fixes this: we need a way to prove `f(z)=v` for a `z` the prover never committed to. That is the DEEP method.
@@ -365,12 +367,12 @@ Notation: n = |H|, u = coset shift for the permutation (`CosetShift`), ω = gene
 
 KZG PLONK at 65534 for reference: setup 0.16 s, prove 0.65 s, verify 1.3 ms, proof < 1 KB.
 
-### B.6 Questions for review — answered 2026-10-07: yes to all three (multi-poly leaves; reject ζ ∈ D' ∪ H; accept 2× FRI size for now)
+### B.6 Questions for review: yes to all three (multi-poly leaves; reject ζ ∈ D' ∪ H; accept 2× FRI size for now)
 1. **D5 multi-poly leaves** — recommended; the alternative (one tree per poly) is a smaller diff but keeps ~15 Merkle paths per query.
 2. **D1 on ζ ∈ D' ∪ H**: reject (honest prover fails with prob ~2^-230) vs re-derive with a counter. Recommended: reject — simpler, standard.
 3. FRI code is 2× larger than needed (degrees ~n+3 force k = 2n). Accept for now; optimization later (e.g. smaller blinding or splitting).
 
-## Fix C design (C1) — drafted 2026-10-07, decisions approved
+## Fix C design (C1) — decisions approved
 
 ### C.0 The problem, in one paragraph
 Zero-knowledge means: everything the verifier sees could have been produced without the witness. The verifier sees each secret polynomial (l, r, o, z, h1–h3) at up to **174 points** — ζ, ω·ζ (z only), and the pair {x, −x} of each of the 86 FRI queries — plus every folded FRI layer value. Today l, r, o carry 2 random coefficients, z 3, h1–h3 none, and the FRI layers have no mask. After fix B the raw-wire leak on H is gone (0/516), but the revealed values are still functions of the witness with far too little randomness to hide it.
@@ -419,7 +421,7 @@ The same idea is applied twice more: to the quotient pieces (they are revealed t
 - Tiny circuits (n = 4): DegreeBound 8 → 512, |D| 64 → 4096 → proofs of a few hundred KB, ms-level time.
 - Soundness unchanged: 86 queries, ρ = 1/8 (rate is defined by DegreeBound, which only grows for tiny n with |D| = 8·DegreeBound).
 
-### C.8 Results (measured 2026-10-07, after C5)
+### C.8 Results (measured after C5)
 | | before fix C (after B) | after fix C |
 |---|---|---|
 | Rank test (revealed points / random coefficients / rank) | l,r,o 159 / 2 / 2; z 160 / 3 / 3; h 159 / 0 / 0 — **fails** | l,r,o 171 / 174 / 171; z 172 / 174 / 172; h 171 / 173 / 171 — **full rank** |
@@ -434,14 +436,14 @@ Estimates (C.6) vs measured: +58 KB vs +60 KB at 65k; +5–10 % prove vs +7 %; t
 
 ### C.7 Open points
 1. Reconcile HK24 eq. (9)/(10) counting of FRI query points (one vs pair) — affects only whether 173 could be 87 later.
-   - Checked 2026-10-21 (re-read `2024-1037` §2 and §4.1): **not a domain difference** — HK24 assumes the same setting as ours (D a disjoint union of cosets of H, D ∩ H = ∅). The difference is the counting: HK24 models the FRI queries as a set Q_D ⊆ D with |Q_D| ≤ n_D, i.e. **one point x per query round**; the sibling −x is not counted. Their factor 2 in (10) is from the shift g·z ("due to translates by g"), not from ±x. So our witness bound 174 = 2·(1 + 86) matches (10) numerically but for a different reason (we count ζ, ωζ and both ±y). Still open: whether the sibling value of a revealed pair leaks beyond what HK24's model covers; until then keep 173 (and 174).
+   - Checked (re-read `2024-1037` §2 and §4.1): **not a domain difference** — HK24 assumes the same setting as ours (D a disjoint union of cosets of H, D ∩ H = ∅). The difference is the counting: HK24 models the FRI queries as a set Q_D ⊆ D with |Q_D| ≤ n_D, i.e. **one point x per query round**; the sibling −x is not counted. Their factor 2 in (10) is from the shift g·z ("due to translates by g"), not from ±x. So our witness bound 174 = 2·(1 + 86) matches (10) numerically but for a different reason (we count ζ, ωζ and both ±y). Still open: whether the sibling value of a revealed pair leaks beyond what HK24's model covers; until then keep 173 (and 174).
    - Follow-up the same day: 87 has **no full proof** in the paper — Lemma 4 (canonical split) is a proof sketch that reuses Lemma 1's argument. That argument (Lemma 1, full proof) is stated over the *set of revealed points* Q = Q_F ∪ Q_D: values are uniform when the randomizer has ≥ |Q| coefficients. 87 comes from instantiating |Q_D| = n_D, i.e. one point per FRI query (their simulator samples x₁…x_{n_D} and uses them as the query points). Our FRI reveals x and −x per query, so |Q_D| = 2·n_D and the same lemma gives 1 + 172 = **173**. Conclusion: the lemma supports 173 for our FRI; the 87 is an instantiation for a one-point-per-query model, not a contradicting bound. Not yet reviewed by anyone else.
 2. ZK is *honest-verifier* in the IOP; with Fiat-Shamir it becomes NIZK in the random-oracle model (standard; BCS) — no extra work, noted for the write-up.
 3. Prover randomness comes from `fr.SetRandom` (crypto/rand) — fine; a deterministic RNG would break ZK.
 
 ## Session Log
 
-### 2026-09-26
+### Restore of plonkfri: design, walkthrough, Phase 0
 - Reset to a clean start: confirmed `master` (`fd5c2443`) has no FRI code (SSH access to `origin` fixed and fetch confirmed up to date); created working branch `pq-pcs-dev` off master, leaving `restore-fri-gadget` (`fb6e65da`) intact for reference.
 - Set up permanent SSH access to GitHub (Keychain-backed agent key + `~/.ssh/config` entry) so `git fetch`/`git log` on remote refs works in every future session.
 - Read `resources/2019-1400.pdf` (RedShift paper) and inspected prior-art commits `1ed22f78` (deletion of `backend/plonkfri`) and the restored `internal/nativefri`/`std/commitments/fri` gadgets, plus gnark-crypto v0.21.0's koalabear packages (confirmed: no FRI code there, only Vortex).
@@ -455,7 +457,7 @@ Estimates (C.6) vs measured: +58 KB vs +60 KB at 65k; +5–10 % prove vs +7 %; t
 - **Phase 0 complete**: added `PLONKFRI` to `backend.ID` (`backend/backend.go`, mirroring the old `1ed22f78^` naming exactly: `PLONKFRI`/`"plonkFRI"`), confirmed a full-repo `go build ./...`/`go vet ./...` still passes (the only other consumer of `backend.Implemented()`, `internal/stats`, already skips backends with no precomputed stats — safe; its `generate/main.go` companion tool is a manual, non-test entry point, not fixed now, noted as a non-blocking follow-up). Added `backend/plonkfri/plonkfri.go`, a thin bn254-only dispatcher mirroring `backend/plonk/plonk.go`'s shape. Added `TestDispatcherRoundTrip`, exercising `Setup/Prove/Verify` through the dispatcher's interfaces (not the bn254 subpackage directly) — passes, confirming the type-assertion plumbing works at runtime, not just that it compiles.
 - Phase 0 is now fully done per the original plan: `backend/plonkfri/bn254/{setup,prove,verify}.go` restored and correct (round-trip + tamper test both pass), `internal/nativefri`'s real `.ID` bug fixed, `backend.ID` entry and dispatcher in place. Next is Phase 1 proper: expanding beyond the single toy circuit (more gate types, edge cases) and deciding what comes after v1 (more curves, in-circuit verifier, batched openings) per the "Open questions" list below.
 
-### 2026-10-07
+### Circuit suite on plonkfri; first findings
 - Ran the library's shared circuit suite (`internal/backend/circuits`, the set `integration_test.go` runs against KZG PLONK/Groth16) through `plonkfri` on bn254 via new harness `backend/plonkfri/suite_test.go` (uncommitted). **28/32 pass** (valid witness proves+verifies; invalid witness rejected).
 - **Real bug found — completeness failure at `vk.Size == 2`** (`assert_equal`, `noComputationCircuit`): ~88% of honest proofs rejected (884/1000 measured), randomly depending on blinding. Root cause: `Z` is blinded with order 2 → `n+3` coefficients, but FRI degree bound is `NextPowerOfTwo(n+2)`; for `n=2` that's 4 < 5. `setup.go:138` assumes `NextPow2(Card+2) == 2·Card`, false for Card ≤ 2. Naively bumping `sizeIopp` to `+3` makes it 100% fail, because `prove.go:218`/`verify.go:67` hardcode `friSize = 2·rho·Size`. Candidate fix: enforce a minimum `Domain[0]` cardinality of 4 in Setup (keeps all invariants). Not yet applied.
 - **Expected failures (v1 scope cut)**: `commit`, `gkr_cube` use BSB22 commitments → Verify fails with "algebraic relation does not hold". Setup silently accepts such circuits; it should reject them with an explicit "unsupported" error.
@@ -468,7 +470,7 @@ Estimates (C.6) vs measured: +58 KB vs +60 KB at 65k; +5–10 % prove vs +7 %; t
 - Result: suite now **30/30 in-scope circuits pass, 2 skipped as out-of-scope** (`commit`, `gkr_cube`). New regression test `TestTinyCircuitCompleteness` (200 proofs on a 1-constraint circuit); ad-hoc stress run of 1000 proofs each on 1–2 constraint circuits with/without public inputs: 0 rejections. `go build ./...` clean.
 - Next: commit fixes + `suite_test.go`; v1 is functionally complete. Then pick post-v1 direction (batched openings for prover speed vs. more curves vs. in-circuit verifier).
 
-### 2026-10-07 (cont.) — security-parameter audit
+### security-parameter audit
 Measured, not just reasoned (probe tests in `internal/nativefri`, removed afterwards; code unchanged):
 - **FRI: 1 query per proof → ~3 bits of security.** `nativefri` has `rho = 8`, `nbRounds = 1`; each "round" derives exactly one query position. Measured acceptance (n=16, 4000 trials): honest 100%; one coefficient over-degree 12.5%; 2× degree 12.9%; *completely random codeword* 13.2% (≈ 1/rho: the final folded layer has rho=8 points). Under Fiat-Shamir a cheater grinds (re-randomizes blinding) → forging costs ~8 hash attempts. Target is ~100–128 bits.
 - **PLONK layer: `zeta` drawn from a set of only 16n points** (`zeta = GenOpening^position`, `position < 2·rho·n`), not the whole field. Schwartz–Zippel escape probability up to ~3n/16n ≈ 19%. Worse: 1/16 of positions give `zeta^n = 1` (zeta inside the circuit domain) → `Z_H(zeta)=0`, RHS=0, H unchecked, the check degenerates to a single gate row. This is structural — the cost of the old code's "sidestep" of opening at arbitrary points — fixable only by DEEP/RedShift-LPC style out-of-domain opening (quotient `(f(X)−f(z))/(X−z)` proven low-degree).
@@ -477,7 +479,7 @@ Measured, not just reasoned (probe tests in `internal/nativefri`, removed afterw
 - **ZK interaction (not soundness)**: every FRI query + opening reveals evaluations of the blinded polys; L/R/O are blinded with only 2 random coeffs, Z with 3. More queries ⇒ blinding degree must grow with the number of revealed evaluations or zero-knowledge breaks.
 - Proposed plan: (A) restructure `nativefri` to one commit phase + s queries, s derived from a target security level; (B) DEEP-style out-of-domain `zeta` from the full field; (C) scale blinding with revealed evaluations. Open decision: provable (Johnson) vs conjectured security parameterization.
 
-### 2026-10-07 (cont.) — query count from the literature (`resources/`)
+### query count from the literature (`resources/`)
 Per-query soundness error for rate ρ, and resulting queries s for λ bits (s = λ / −log2(per-query error)):
 - Original FRI (`Revision2OfTR17-134`, Thm 3.3): proven only for δ ≤ (1−3ρ)/4 → per-query reject ≥ 5/32 at ρ=1/8 (~0.25 bits/query; impractical). Conj. 1.5: δ up to 1−ρ. Paper's own example: ρ=1/8, ε=2⁻⁸⁰.
 - DEEP-FRI (`2019-336`): proven per-query error max(1−δ, √ρ) up to the Johnson bound, needs larger fields.
@@ -493,7 +495,7 @@ Per-query soundness error for rate ρ, and resulting queries s for λ bits (s = 
 
 Measured per-query acceptance of garbage = 1/8 = ρ, i.e. the conjectured regime is what we observe in practice; the proven bound is a 2× safety margin.
 
-### 2026-10-07 (cont.) — fix A landed
+### fix A landed
 - `internal/nativefri` restructured: COMMIT phase once (each layer's Merkle tree built once, all nodes kept via new `merkleTree`, path-compatible with gnark-crypto's `merkletree.VerifyProof`), then **`nbQueries = 86`** query chains (proven Johnson-bound, 128 bits at ρ=1/8). Query positions: one Fiat-Shamir seed after all roots + final evaluation are bound, position j = H(seed‖j) mod |D|. Proof format: `Rounds []Round` → `Roots [][]byte` + `Queries []Query` + `Evaluation`.
 - **Found and fixed a 4th, critical hole**: `VerifyOpening` never checked `ClaimedValue` against the Merkle-authenticated leaf (`ProofSet[0]`), and `verify.go` uses `ClaimedValue` — a cheater could claim any evaluation (e.g. solve the final identity for h(zeta)) with a valid path → forgery with probability 1. Now rejected (`ErrClaimedValue`); regression test written first and confirmed failing on the old code.
 - Verifier hardening: checks `ID == Roots[0]` (ID is what PLONK binds into Fiat-Shamir), computes layer sizes itself instead of trusting prover-supplied `numLeaves`, rejects malformed shapes with `ErrMalformedProof` instead of panicking.
@@ -501,26 +503,26 @@ Measured per-query acceptance of garbage = 1/8 = ρ, i.e. the conjectured regime
 - Perf (bn254 refCircuit, before → after): 4094 constraints setup 550→260ms, prove 534→383ms, verify 0.6→39ms; 65534: setup 8.3→4.1s, prove 9.2→6.8s, verify 1.0→69ms. Proof's 7 proximity proofs ≈ 3.2MB / 4.8MB. Verify cost is 18 proximity proofs × 86 chains; the 11 VK proofs are fixed and could be checked once at setup (cheap later win). Size is the next driver for batching + Merkle path dedup.
 - Still open: fix B (out-of-domain zeta — currently caps soundness at ~4 bits), fix C (blinding vs 86×revealed evaluations — ZK now clearly insufficient).
 
-### 2026-10-07 (cont.) — literature review + security target
+### literature review + security target
 - Checked the security plan against the papers in `resources/` (FRI/ethSTARK, DEEP-FRI, RedShift, `2021-582`, `2022-1216`, `2023-1071` Block et al., `2023-691` weak F-S, `2024-1037` HK24). Fix B/C designs confirmed and extended: coset FRI domain, VK digest in the transcript, separate mask polynomial R(X), randomized quotient pieces. See "Literature basis", "Additional considerations", "Findings from 2023-691 / 2024-1037".
 - PQ analysis (only `2023-1071` Thm 3.15 gives quantum bounds): 128 classical ≈ 64 PQ bits; sha256 caps PQ at ~85 bits; bn254 fr caps proven PQ near ~100 bits.
 - **Decided: security target (a)** — 128-bit classical, "plausibly PQ".
 - To obtain/verify: [CMS19] ePrint 2019/834, Chiesa–Yogev book, NIST PQC criteria §4.A.5, BHT97, Bernstein 2009.
 - Next: Step 0 (master red: gadget `fri_test.go`), then fix B (B1 design first).
 
-### 2026-10-07 (cont.) — Step 0 done, fix B designed (B1)
+### Step 0 done, fix B designed (B1)
 - **Step 0**: gadget test gated behind `fri_gadget_phase3` (commit `ef94dacb`). Reasoning: a reshape of the proof struct would compile but still fail — gadget and nativefri query *different positions* (`seed mod |D|` vs `H(seed‖j) mod |D|`), so a real port is needed (Phase 3). Verified the whole tree's test packages compile (`go test -run XXX ./...`), nativefri + plonkfri suites green.
 - **Measured the coset-domain ZK leak** with a throwaway probe (60 secret wires): each of L/R/O reveals 172 codeword values per proof, 5–11 of which are raw secret wire values (≈172/16 expected) — so consideration 1 is a concrete break, not a theoretical one.
 - **B1 design written** ("Fix B design (B1)"). Key reading: `2022-1216` §4–5 (DEEP PCS, Protocol 3, Thm 8) turned out to be an almost direct template; `2023-1071` §2.4 OPlonky for the PLONK/F-S side; `2021-582` §3.5 for multi-column Merkle leaves. Decisions D1–D10; 86 queries remain valid (D8); setup binding resolved (D9); Id polys dropped (D6). App. C of `2023-1071` (parallel repetition subtlety) only concerns t>1 in small fields — not us.
 - Design approved (B.6: yes to all three). Next: B4's red-first attack test, then B2.
 
-### 2026-10-07 (cont.) — B4: concern 2 attack demonstrated
+### B4: concern 2 attack demonstrated
 - Attack design: prove the **false** statement "∃X: X²=5" (5 is a non-square in bn254 fr). Cheater computes every polynomial from a real witness (X=3, Y=9) but binds Y=5 into Fiat-Shamir like the verifier. The two statements differ only by `(5−9)·L₀(X)`, and `L₀` is 0 on every row of H except row 0 → whenever ζ = ωʲ, j≠0, the verifier's identity holds; the h-side is `h(ζ)·Z_H(ζ) = 0` anyway. Cheater just retries with fresh blinding.
 - Hook: `prove(..., transcriptPublic, ...)` (unexported; `Prove` passes nil → unchanged). Lets tests play a cheater without copying the prover; seed for the Step 3 malicious-prover harness.
 - Result: **36/800 accepted (4.5%), all 36 with ζ ∈ H**; prediction 1/16·3/4 = 4.69% (n=4, row 0 excluded). Theory and measurement agree; cause confirmed, not just correlated.
 - Test is red on `pq-pcs-dev` by design; it becomes the acceptance criterion for fix B (must be 0/800). Next: B2.
 
-### 2026-10-07 (cont.) — B2: batched DEEP-FRI in `nativefri`
+### B2: batched DEEP-FRI in `nativefri`
 - New file `internal/nativefri/batch.go`; old per-polynomial API kept untouched so every package stays green until B3 switches PLONK over (only shared helpers `queryChain`/`queryPositions` extracted).
 - Key simplification (`2022-1216` §3.7): FRI over the coset a·D = plain FRI over D on `q(a·X)`. Committed values are the same; only the DEEP quotient uses the real point `x = a·gⁱ`. → fix A's folding code reused unchanged.
 - API: `NewScheme(degreeBound, h)`; `Commit(polys...)` (one tree, leaf = all polys at one point, sibling pair {x, −x} adjacent); `Open(seed, committed, claims)` / `Verify(seed, commitments, claims, proof)`. Transcript binds caller seed + every root (+width) + every claim (point, poly ref, value) before λ; folding challenges + query seed follow. Points in a·D rejected (`ErrPointInDomain`); leaves parsed canonically. Merkle openings are now pair openings (two rows + one path) instead of fix A's `[2]MerkleProof` trick.
@@ -529,7 +531,7 @@ Measured per-query acceptance of garbage = 1/8 = ρ, i.e. the conjectured regime
 - Fixture bug found by the completeness test (3-coeff poly with degreeBound 2 → `ErrDegree`): test bug, not scheme bug.
 - Next: B3 — rewire PLONK setup/prove/verify onto `Scheme`; acceptance criterion `TestForgeryZetaInDomain` 0/800.
 
-### 2026-10-07 (cont.) — B3: PLONK rewired, fix B complete
+### B3: PLONK rewired, fix B complete
 - Setup: one tree for the 8 preprocessed polys (ql, qr, qm, qo, qk, s1, s2, s3); Id polys dropped (verifier computes `uᵏ·ζ`); `DegreeBound = NextPow2(n+3)` explicit (D10); VK is O(1): roots + parameters + `digest()`.
 - Prove/verify: transcript object advanced round by round (`newTranscript`, `afterLRO`, `afterZ`, `afterH`) shared by prover, verifier and tests — first version replayed the whole transcript with placeholder roots, rewritten because it was hard to read. Claims and commitment order built by one shared function (`Proof.claims`), so prover and verifier can't disagree on batching coefficients.
 - Attack results (acceptance criterion): in-domain-zeta forgery **0/800** (was 36/800), all rejected by the *identity* check — honest openings, false statement, random ζ. New test: cheater solves `h1(ζ)` from the identity so the identity holds by construction (checked in the test) → **0/200**, all rejected by *FRI folding*. Each defence is shown to catch its own attack.
@@ -540,20 +542,20 @@ Measured per-query acceptance of garbage = 1/8 = ρ, i.e. the conjectured regime
 - Known caveat: `Scheme` holds one `hash.Hash`, so a VK must not be used by concurrent goroutines (same as before B). Fix with a hash constructor when needed.
 - Next: fix C (zero-knowledge): blinding degree vs ~2·86 revealed points + ζ openings, mask polynomial R in the batch (HK24 Protocol 2), randomized quotient pieces.
 
-### 2026-10-07 (cont.) — C1: fix C design
+### C1: fix C design
 - Read `2024-1037` Protocol 1–3, Lemma 1–2, §4.1 (canonical split randomization, Lemma 4). §4.1 is exactly our h1/h2/h3 split.
 - Derived parameters from first principles and compared with the paper: witness blinding b = 174 (own count = HK24 eq. (10)); quotient randomizer 173 (own count) vs HK24's 87 — unreconciled (one vs two points per FRI query); user chose 173. Mask always on; tiny circuits get DegreeBound ≥ 512 (user decisions).
 - **Found while deriving:** the mask R must not share the coefficient λ⁰ with the first claim — otherwise a cheater commits "R" = P − Q₀ for a false quotient Q₀ and FRI, which only sees R + Q₀, accepts. Claims move to λ¹, λ², … (as in HK24 eq. (2)); a test for this attack is planned in C3.
 - Degree check of the derivation against today's code (b = 2/3 → pieces n+2 ✓) before trusting it for b = 174.
 - Testing choice: ZK can't be tested statistically (every 254-bit value looks random); test the structural condition of Lemma 1 (full rank of the blinding map on the revealed points) instead, red first.
 
-### 2026-10-07 (cont.) — C2: zero-knowledge test, red first
+### C2: zero-knowledge test, red first
 - Behaviour-preserving refactors first (all tests green after them): `nativefri.(*Scheme).QueriedPoints` (shares the transcript replay with `Verify` via `replay`, so it can't drift); blinding sizes as named constants `nbBlindLRO=2`, `nbBlindZ=3`, `nbBlindQuotient=0`; the hard-coded `n+2` piece size now lives only in `vk.pieceSize()` (prover split + verifier RHS).
 - `TestRevealedValuesAreUniform` checks HK24 Lemma 1's exact condition on a real proof: per secret polynomial, the matrix `[B(xᵢ)·xᵢʲ]` over the distinct revealed points (B = Z_H for l/r/o/z, Xᵏ for h1/h2) must have full row rank. Also checks the prover really outputs n + b coefficients (measures the prover, not a constant). `TestRank` sanity-checks the elimination helper on Vandermonde matrices.
 - **Result (red, as intended):** l/r/o revealed at 159 points with rank 2; z 160 points, rank 3; h1/h2 159 points, rank 0.
 - Observation: 159, not 173 — queries are drawn with replacement and this circuit's FRI domain has 512 pairs, so ≈ 86·85/(2·512) ≈ 7 collide → 1 + 2·(86 − 7) ≈ 159 predicted, 159 measured. Large circuits collide less, so the 173/174 bound is still what's needed.
 
-### 2026-10-07 (cont.) — C3: mask polynomial R in `nativefri`
+### C3: mask polynomial R in `nativefri`
 - Order: plumbing with the mask *off* (internal `open(…, mask)`, claims moved to λ¹, λ², …) → all tests green except the known C2 red test → mask tests written → `TestMaskRandomizesOpening` red (no mask) → mask switched on in `Open` (R with DegreeBound − 1 random coefficients, own Merkle tree, root bound before λ; `Verify` requires it) → green.
 - **Decision C4 demonstrated, not just argued:** `TestMaskCannotCancelFalseClaim` commits a crafted "R" = P − E that cancels a false claim's error term E. With R sharing λ⁰ with the first claim (`firstClaimPower = 0`, unsafe): **50/50 accepted**. With our design (claims at λ¹…): **0/50**. The test also fails if the attack stops working in the unsafe variant, so it can't silently become vacuous.
 - With the mask: two openings of the same statement share no FRI layer root or final value (fresh randomness in every fold); mask root/row tampering and a missing mask are rejected; B2 cheater tests unchanged (0/100, 0/100); PLONK attack tests unchanged (0/800, 0/200), leak 0/516.
@@ -561,7 +563,7 @@ Measured per-query acceptance of garbage = 1/8 = ρ, i.e. the conjectured regime
 - Measured vs estimate (C.6): proof 65k 0.84 → **0.90 MB** (+60 KB, est. +58 KB); 4k 0.60 → 0.64 MB (+40 KB, est. +47 KB); prove 65k 1.97 → 2.07 s (+5 %, est. 5–10 %).
 - Still red: `TestRevealedValuesAreUniform` (witness blinding + quotient split are C4).
 
-### 2026-10-07 (cont.) — C4: blinding and randomized quotient split in `plonkfri`
+### C4: blinding and randomized quotient split in `plonkfri`
 - Blinding constants derived in code from `nativefri.NbQueries` (exported): l/r/o/z 2·(1+86) = 174, quotient randomizers 1 + 2·86 = 173.
 - One `sizes(n)` in `setup.go` replaces three hard-coded rules (FRI bound `n+3`, quotient domain 4n/8n, pieces `n+2`): piece size k = ⌈(3n + b_Z + 3·b_LRO − 3)/3⌉, DegreeBound = NextPow2(max(k + 173, n + 174)), quotient domain = NextPow2(3k). **Checked the formula against the old values first** (b = 2/3 → k = n+2 ✓) before trusting it at 174. Exact count gives k = n+231; the design's HK24-based estimate said n+232 — doc corrected. `PieceSize` stored in the VK and bound in its digest.
 - Randomized split: ĥ1 = h1 + Xᵏt1, ĥ2 = h2 + Xᵏt2 − t1, ĥ3 = h3 − t2 (telescopes to h; `TestRoundTrip` and the suite confirm the verifier's equation is unchanged).
@@ -570,43 +572,183 @@ Measured per-query acceptance of garbage = 1/8 = ρ, i.e. the conjectured regime
 - Measured: 65k and 4k unchanged vs C3 (DegreeBound stays 2n) — 65k: prove 2.15 s, verify 4.2 ms, 0.90 MB. Tiny circuit (2 constraints): proof 0.19 → 0.43 MB, prove ~0 → 10 ms (decision C7, as estimated). Side effect: the 800-attempt attack test went 1.0 s → 8.8 s for the same reason.
 - Measuring the pre-C4 tiny size needed the old code: done in a temporary `git worktree` at the C3 commit (a `git stash` attempt measured nothing — the stashed code lacked the tiny case).
 
-### 2026-10-07 (cont.) — C5: fix C complete
+### C5: fix C complete
 - Final run: whole-repo build + every test package compiles; vet/gofmt clean; nativefri 10/10, suite 30/30 (+2 skipped), tiny 200, bn254 all green incl. attacks (0/800, 0/200), mask (0/50), leak (0/516), rank test (full rank).
 - Results table in "Fix C design" C.8; lessons (h)–(l) added to "Lessons that generalize"; next steps updated (Step 3 harness mostly exists; concurrency, tiny-circuit sizing, HK24 87-vs-173, external review added).
 - Status: plonkfri on bn254 is sound and (honest-verifier) zero-knowledge by construction, with tests for each mechanism; not externally reviewed.
 
-### 2026-10-07 (cont.) — follow-ups documented
+### follow-ups documented
 - New section "Follow-ups (after fixes A–C)": F1–F12 grouped as before-real-use (review, serialization, concurrency), robustness (malicious-prover harness, HK24 87-vs-173), cost (size, prover time, tiny circuits), research (PQ target), later phases (in-circuit verifier, features, housekeeping). Each with why / approach / "done when", so the next work can start test-first.
 - Branch `pq-pcs-followups` (stacked on PR #6, which was still open).
 
-### 2026-10-07 (cont.) — next steps fixed
+### next steps fixed
 - PRs #6 (fix C) and #7 (follow-ups) merged. Order decided: F3 → F2 → F4 → F5 → cost/research/Phase 3; F1 review in parallel. Recorded under "Open questions / next steps".
 
-### 2026-10-07 (cont.) — development paused, presentation prepared
+### development paused, presentation prepared
 - Development stopped at the user's request; all work merged to `master` (PRs #1–#7 plus this docs PR). Resume at F3 (see "Next steps").
 - Supervisor deck, cut to 8 slides at the user's request: four decision gates (security target, FRI query count, out-of-domain ζ, zero-knowledge), each as problem → academic study → implementation → measured outcome; plus context, benchmarks vs KZG at 65k, status/next steps. Speaker notes carry the reasoning. Link under "Next steps".
 
-### 2026-10-15 → 2026-10-20 — FRI walkthrough, new supervisor deck (.pptx)
+### FRI walkthrough, new supervisor deck (.pptx)
 - No code changes. Section-by-section walkthrough of `nativefri.Scheme.Open` (mask R → transcript/λ → DEEP batch q → folding/commit → queries) and the verifier's view, with throwaway measurements (deleted afterwards): λ equals a hand-computed sha256 over the bound statement; ζ-claim point on the coset → `ErrPointInDomain`; honest q has < DegreeBound coefficients, one false claim makes q full-length; honest folds end in a constant, one-too-many coefficients don't.
 - New 10-slide .pptx for the supervisor (replaces the 8-slide artifact), structured by what was done: summary → (1) literature-based corrections (change / justification / effect) → (2) batched opening (18 FRI proofs → 1; 4.8 → 0.84 MB) → (3) testing (attack tests with before/after and rejecting check; structural ZK rank test) → (4) FRI in detail (inputs; 16 claims → one degree test; folding + 86 queries) → results vs KZG + next steps → WHIR outlook (not implemented). Short descriptive titles; detail in speaker notes. Kept outside the repo (`~/Desktop/FRI-PLONK-supervisor.pptx`).
 - Open question raised on the last slide: harden FRI (F1–F7) vs prototype WHIR behind the `Scheme` interface.
 
-### 2026-10-23 — WHIR / Akita exploration
+### WHIR / Akita exploration
 - Both are multilinear PCSs; WHIR also supports univariate queries. Option A (realistic next experiment): WHIR behind the existing `Scheme` Commit/Open/Verify, PLONK unchanged (univariate f(ζ) = inner product with ⊗ⱼ(1, ζ^(2^j))). Option B: multilinear PLONK (HyperPlonk-style, sumcheck) — a new backend; the only fit for Akita. Open for either: ZK construction (HK24 is FRI-specific), parameter analysis.
 - Akita and WHIR papers added to `resources/`.
-- Akita feasibility in gnark (2026-10-25): not feasible as an extension of `backend/plonkfri`. (1) bn254 Fr (2-adicity 28) is outside Akita's partial-splitting condition q ≡ 2s+1 (mod 4s); its profiles are 2³²−99, 2⁶⁴−59 (≡ 5 mod 8, 2-adicity 2) and 2¹²⁸−2³²+22537 (2-adicity 3). (2) Conversely those moduli have no large power-of-two subgroups, so FFT-based univariate PLONK cannot run over them — Akita forces both a field change and a multilinear (sumcheck) PIOP, i.e. a new backend. (3) Reusable in gnark/gnark-crypto: field generator, Ring-SIS hashing (Vortex; but over NTT-friendly fully split primes), GKR sumcheck, small-field constraint systems. Missing: non-NTT ring arithmetic, gadget decomposition, norm/range checks, folding recursion, planner (could be run offline with the Rust tool). Plus Module-SIS assumption, ROM only, no ZK.
-- Read `2026-1367` (SoK), `2026-391` (ZK-WHIR), `2017-305` (ZK sumcheck) (2026-10-25). Corrections/additions to the above: (1) mutual correlated agreement for RS is proven up to the Johnson bound by Haböck, ePrint 2025/2110 (preprint, not yet read) — so WHIR-JB, not only WHIR-UD, is proven (WHIR Table 5: JB 299 KiB vs UD 621 KiB at 2²⁴, ρ = 1/2, 128 bits). (2) The up-to-capacity conjectures (CA, MCA, list size) were disproved over large fields in Nov 2025 (Crites–Stewart 2025/2046; Ben-Sasson et al. 2025/2055); Johnson-bound results unaffected — supports our proven-Johnson FRI decision; WHIR's headline (CB) figures used the refuted form. (3) ZK-WHIR gives HVZK with 1 + o(1) overhead; soundness parametrised by the MCA error (so proven at Johnson via 2025/2110); RS ZK encoding = t random coefficients (Prop. 3.19), same mechanism as our blinding; covers the PCS and an R1CS reduction, not PLONK; no benchmarks in the paper. (4) `2017-305` is theory (IPCP model); background only.
-- Read both papers (2026-10-25). WHIR: feasible behind `Scheme` (bn254 Fr: char ≠ 2, 2²⁸ smooth subgroup, 254-bit field so no extension needed); univariate claims via weight Z·eq(X, (ζ, ζ², …)). But only WHIR-UD is proven; JB and CB rest on Conjecture 4.12 (mutual correlated agreement), and at 128 bits UD is ~2–4× the size of CB (Table 5). No ZK in the paper; a later paper gives an honest-verifier ZK variant (Chiesa/Fenzi/Weissenberg, ePrint 2026/391, "negligible overhead"; implemented in Plonky3 and the WHIR reference repo); in `resources/`, not yet read. Akita: not feasible on bn254 Fr without new parameters/analysis (implemented for 32/64/128-bit primes with partial splitting, q ≡ 2s+1 mod 4s; r ≡ 1 mod 2²⁸ splits X^d + 1 fully); adds Module-SIS, ROM only, no ZK; its pay-per-bit advantage does not apply to dense PLONK polynomials.
+- Akita feasibility in gnark: not feasible as an extension of `backend/plonkfri`. (1) bn254 Fr (2-adicity 28) is outside Akita's partial-splitting condition q ≡ 2s+1 (mod 4s); its profiles are 2³²−99, 2⁶⁴−59 (≡ 5 mod 8, 2-adicity 2) and 2¹²⁸−2³²+22537 (2-adicity 3). (2) Conversely those moduli have no large power-of-two subgroups, so FFT-based univariate PLONK cannot run over them — Akita forces both a field change and a multilinear (sumcheck) PIOP, i.e. a new backend. (3) Reusable in gnark/gnark-crypto: field generator, Ring-SIS hashing (Vortex; but over NTT-friendly fully split primes), GKR sumcheck, small-field constraint systems. Missing: non-NTT ring arithmetic, gadget decomposition, norm/range checks, folding recursion, planner (could be run offline with the Rust tool). Plus Module-SIS assumption, ROM only, no ZK.
+- Read `2026-1367` (SoK), `2026-391` (ZK-WHIR), `2017-305` (ZK sumcheck). Corrections/additions to the above: (1) mutual correlated agreement for RS is proven up to the Johnson bound by Haböck, ePrint 2025/2110 (preprint, not yet read) — so WHIR-JB, not only WHIR-UD, is proven (WHIR Table 5: JB 299 KiB vs UD 621 KiB at 2²⁴, ρ = 1/2, 128 bits). (2) The up-to-capacity conjectures (CA, MCA, list size) were disproved over large fields in Nov 2025 (Crites–Stewart 2025/2046; Ben-Sasson et al. 2025/2055); Johnson-bound results unaffected — supports our proven-Johnson FRI decision; WHIR's headline (CB) figures used the refuted form. (3) ZK-WHIR gives HVZK with 1 + o(1) overhead; soundness parametrised by the MCA error (so proven at Johnson via 2025/2110); RS ZK encoding = t random coefficients (Prop. 3.19), same mechanism as our blinding; covers the PCS and an R1CS reduction, not PLONK; no benchmarks in the paper. (4) `2017-305` is theory (IPCP model); background only.
+- Read both papers. WHIR: feasible behind `Scheme` (bn254 Fr: char ≠ 2, 2²⁸ smooth subgroup, 254-bit field so no extension needed); univariate claims via weight Z·eq(X, (ζ, ζ², …)). But only WHIR-UD is proven; JB and CB rest on Conjecture 4.12 (mutual correlated agreement), and at 128 bits UD is ~2–4× the size of CB (Table 5). No ZK in the paper; a later paper gives an honest-verifier ZK variant (Chiesa/Fenzi/Weissenberg, ePrint 2026/391, "negligible overhead"; implemented in Plonky3 and the WHIR reference repo); in `resources/`, not yet read. Akita: not feasible on bn254 Fr without new parameters/analysis (implemented for 32/64/128-bit primes with partial splitting, q ≡ 2s+1 mod 4s; r ≡ 1 mod 2²⁸ splits X^d + 1 fully); adds Module-SIS, ROM only, no ZK; its pay-per-bit advantage does not apply to dense PLONK polynomials.
 
-### 2026-10-25 — Lattice PCS survey
+### Lattice PCS survey
 - Report: `reports/Lattice PCS for gnark.md` (notes in `research_notes/Lattice PCS for gnark/`). Conclusion: no lattice-native PCS fits bn254 Fr without new research (all instantiated at ~32–64-bit partially split q; q = r plausible only at d ≤ 32, unparameterised; batching must move to claims; ZK needs lattice-level masking). Closest fit Greyhound (univariate, Module-SIS, ~60 KB, but 74 ms verify, no ZK/QROM/Go). Vortex (gnark-crypto) integrable but lattice only in the column hash, no PQ gain, MB-size proofs, no ZK. WHIR remains the next step.
 
-### 2026-10-25 — Greyhound Phase 0 (IBM-25)
+### Greyhound Phase 0 (IBM-25)
 - Report: `reports/Greyhound phase 0 feasibility.md`; script, output and Go benchmark in `research_notes/Greyhound phase 0/`. q = r, d = 32 is cryptographically plausible: LS18 bound re-derived and toy-tested (‖c − c′‖₂ < r^{1/d}: 243 at d = 32, 15.6 at d = 64 → d ≤ 32); 128-bit challenge set exists (uniform [−8, 8], 2^130.8) but op-norm ≈ 75 vs LaBRADOR's 15, so LaBRADOR bounds must be re-proved; core-SVP shows commitment bits independent of q (κ ≈ 7 at d = 32). Proof size estimated 60–500 KB (< FRI 0.90 MB). Verifier: Fr mul 13.9 ns vs 2.5 ns at 32 bits (measured) → estimated 0.4–2 s vs FRI 4.9 ms.
 - Open: decide goal (lattice PCS with slow verifier → Phase 1 = re-prove LaBRADOR bounds; FRI replacement → WHIR). Need PDFs of ePrint 2017/523, 2022/1341, 2024/1293 to confirm recalled parameters.
 
-### 2026-10-26 — Lattice summary in Linear, deck revisions
+### Lattice summary in Linear, deck revisions
 - Linear (project "Master's Thesis: PQ-PCS in Go"): IBM-26 (five properties no lattice PCS combines: small proofs, fast verifier, standard Module-SIS, ZK, QROM; Akita/Greyhound/Hachi/RoKoKo/CMNW shortfalls), IBM-27 (Akita: efforts to implement — new field + multilinear PIOP = new backend), IBM-28 (Hachi, RoKoKo, CMNW feasibility), IBM-29 (why bn254 Fr: reuse of gnark-crypto/PLONK FFT domain for v1, not a requirement), IBM-30 (WHIR vs Akita verdicts and recommendation: WHIR next), IBM-31 (why FFT-friendly fields and lattice schemes conflict: 2-adicity wants X^d+1 to split, lattice challenges want it not to). Phase 0 results posted on IBM-25.
 - Supervisor deck now 10 slides: dropped the "proven, not conjectured" row and the WHIR outlook slide; added a plain-language zero-knowledge slide (witness blinding, FRI mask, randomized quotient split; HK24). Snapshot committed as `presentations/FRI-PLONK-supervisor.pptx`; working copy stays at `~/Desktop/FRI-PLONK-supervisor.pptx`.
 - Greyhound benchmark moved to `research_notes/Greyhound phase 0/_bench/` so `go list ./...` ignores it (the path with a space is an invalid import path).
 - Open: WHIR vs Greyhound Phase 1 decision; ePrint 2017/523, 2022/1341, 2024/1293 PDFs still to confirm recalled parameters.
+
+### branch check, HyperPlonk + WHIR structure review
+- `pq-pcs-pause` = its upstream; behind `origin/master` by 3 (fork PR #9, merges cleanly); not containing `origin/feature/hyperplonk` (A. De Caro: plan/specs/papers, no code). Merging `feature/hyperplonk` conflicts only in PROJECT.md (both branches appended session logs).
+- Read PLAN, SPEC-PIOP, SPEC-WHIR, PANURUS, STATUS. Proposed structural changes (not yet decided): decide D8 first; group new packages under one root (`internal/pq/…`) instead of six new top-level `internal/` packages; boundary as `mlpcs/bn254` (not under `whir/`); land plonkfri-touching extractions (`plonkperm`, `encoding`) as separate PRs to `master`; reconcile PROJECT.md across branches.
+- **D8 decided by user: (a) copy (vendor) hyperplonk into Panurus, as done for plonkfri.** Consequence: keep everything hyperplonk needs under `backend/hyperplonk` + one helper root, with no imports of other fork-only packages, so the copy is mechanical. To be reflected in PLAN.md §4 / STATUS.md on `feature/hyperplonk`.
+
+### status check: FRI-PLONK done, HyperPlonk + WHIR planned
+- Verified on `pq-pcs-pause`: `go test ./backend/plonkfri/... ./internal/nativefri/...` green. `origin/master` (`6dd1d5f2`) also has serialization (fork PR #9, `marshal.go`) and this branch's docs (PR #8); the branch is 4 merge commits behind it, local `master` 38 behind.
+- `origin/feature/hyperplonk` (now `234611cf`): docs only (`docs/hyperplonk-whir/` PLAN, SPEC-PIOP, SPEC-WHIR, PANURUS, STATUS, OVERVIEW, LOGUP, SUMCHECK), no Go code. All milestones M−1…M7 are `todo`; kick-off items K3, K7, K8 still open. Based on `16a40bc2`, so it lacks PR #8.
+- Open: D8 = (a) vendoring is not yet in PLAN §4 / STATUS on `feature/hyperplonk` (still "open", M7 "blocked (D8)"); the previous and this entry are uncommitted.
+- Synced the same day: `pq-pcs-pause` and local `master` fast-forwarded to `origin/master` (`6dd1d5f2`); local tracking branch `feature/hyperplonk` created. `feature/hyperplonk` itself not modified (D8 update and merge of `master` into it are still to do there).
+
+### HyperPlonk + WHIR: scope reset, fresh documentation
+- User decisions: nothing is pushed until there is more progress; D8 = (a) vendoring; sole goal = implement HyperPlonk + WHIR supported by theory verified from papers; Panurus ignored for now; A. De Caro's docs kept as is, own documentation written.
+- New branch `hyperplonk-whir` from `pq-pcs-pause`. A trial merge of `feature/hyperplonk` was aborted (it would have mixed the two PROJECT.md records); only its `resources/` papers were taken (14 PDFs added, incl. 2022/1355 HyperPlonk, 2022/1530 LogUp, 2025/2110 and 2025/2051 MCA at Johnson, 2016/116 BCS).
+- Read and transcribed (statements only, no proofs): HyperPlonk §3.1–3.5, §3.8, §4, App. A.2–A.3; WHIR §1.1, §2.2, §4, Construction 5.1, Thm 5.2, §6.1–6.2, Thm 7.5, Lemma 7.6; 2025/2110 Thm 2; 2025/2051 Thm 9.2; 2026/391 Thm 1, Cor 3, Prop 3.19; LogUp Lemmas 3, 5, Thm 4. → `docs/hyperplonk/THEORY.md`.
+- Findings: WHIR Thm 5.2 needs MCA only for two words (err*(C, 2, δ)), which is the case 2025/2110 Thm 2 states → the Johnson regime rests on two preprints rather than on Conjecture 4.12; unique decoding is proven in the WHIR paper. Computed for bn254 at ρ = 1/8: round-0 queries 155 (UD) vs 90 (JB); all algebraic error terms ≤ 2⁻¹⁸⁰. Open theory items Q1–Q5 (notably: Thm 7.5 assumes a round-by-round knowledge sound PIOP, which the HyperPlonk paper does not state in that form).
+- Next: decisions D2, D3, D4, D7; then M0.
+
+### HyperPlonk M1: sumcheck and zerocheck
+- User: start implementing; every implementation decision must rest on proven or self-verified theory; literature gaps and covering sources are reported and added. D3 decided: HyperPlonk permutation check first, LogUp later.
+- Code: `backend/hyperplonk/internal/transcript` (sha256 hash chain, 512-bit challenge reduction) and `backend/hyperplonk/internal/sumcheck` (sumcheck for Σ g(T₁..T_k), zerocheck). Tests green; 7 mutation checks each caught by a test.
+- Theory: sumcheck soundness μd/|F| verified exactly on small fields (optimal cheater by exhaustive search: e.g. 602/1331 vs bound 726/1331 on F₁₁, μ = 3, d = 2); zerocheck first term μ/|F| verified for every non-zero table on F₃, F₅, F₇ (the paper states dμ/|F|).
+- Gaps (THEORY §8): sumcheck proof not in the cited papers → Thaler's book added to `resources/`; round-by-round soundness source [CCH+19] still to obtain; hash-chain Fiat–Shamir has no read source yet (M5).
+- Next: rest of M0 (WHIR Thm 5.2 proof, one WHIR round by hand, O2); M2 parameter calculator (needs D2, D7); M3 PIOP on an ideal oracle.
+
+### HyperPlonk: product check
+- `backend/hyperplonk/internal/prodcheck`: Quark/HyperPlonk product check (§3.3) with α-batched zerocheck; returns the evaluation claims to be checked against commitments. Tests green; 5 mutations caught.
+- Finding (THEORY O4, O5): HyperPlonk Thm 3.3 accepts false products when f₁ and f₂ share a zero on the hypercube (forgery built in `TestCommonZeroIsNotCaught`); Thm 3.4 is complete only up to 2^μ/|F|. Our permutation use is unaffected (S5). Quark paper to be obtained to compare the original statement.
+- Next: multiset + permutation check (H8, H9), then gate identity and public inputs on an ideal oracle (M3); rest of M0 (WHIR); D2, D7 before M2.
+
+### HyperPlonk M3: PIOP on an ideal oracle
+- User: D2 (UD first, Johnson second) and D7 (ρ = 1/8, k = 4) confirmed; fetch CCH+19 and Quark.
+- Code: `backend/hyperplonk/internal/permcheck` and `internal/piop`. The PIOP proves gnark SparseR1CS circuits against a stand-in commitment (hash of the table): 31 circuits of the shared suite pass, 2 skipped (api.Commit). All cheaters rejected; 10 further mutations caught.
+- Theory: THEORY S5–S9 and §9 (error budget ≈ 2⁻²³¹ at μ = 20). Public inputs go through the gate identity (PlonK style) instead of HyperPlonk's step 4. The verifier leaves 15 evaluation claims on 8 polynomials for the commitment scheme (PLAN §6).
+- Blocked: ePrint refuses automated downloads (browser challenge); 2018/1004 and 2020/1275 must be saved to `resources/` by hand.
+- Next: M0 for WHIR (proof of Thm 5.2, Thm 5.6, one round by hand, O2), then M2 parameter calculator, M4 WHIR.
+
+### sources 2018/1004 and 2020/1275 added
+- User downloaded both; copied to `resources/`. 2018/1004 is "Fiat-Shamir From Simpler Assumptions" (Canetti et al.), 2020/1275 is "Quarks" (Setty, Lee).
+- Read: RBR soundness definition (2018/1004 Def 5.3, Prop 5.4, sumcheck state in §2.1); Quark Lemma 5.1 (plain product tree — the division, and with it observation O4, is HyperPlonk's extension) and its zerocheck error log m/|F| (confirms our μ/|F|). THEORY §8 updated.
+- Next unchanged: M0 for WHIR, M2, M4. Open theory: RBR state function for the whole PIOP (Q1); hash-chain Fiat–Shamir.
+
+### HyperPlonk M2 + M4: WHIR
+- `backend/hyperplonk/internal/whir`: parameter calculator (all error terms of WHIR Thm 5.2/5.6, both regimes), Reed–Solomon encoding of multilinear tables, Merkle tree, commit/open/verify for evaluation claims. Sumcheck package gained partial-round functions.
+- Results: honest proofs verify (m = 0..11, UD and Johnson); 10 verifier mutations caught. One opening at m = 14: 365 KiB (UD) / 145 KiB (Johnson), equal to the size predicted from the parameters.
+- Estimate for the composed proof (before measuring): 8 polynomials opened separately (D4) → roughly 8 × the single-opening size, i.e. several MiB in UD at 2^14 rows — larger than plonkfri's 0.84 MiB. Batching/stacking (D4) and the Johnson parameter set are the levers; to be measured in M6.
+- Next: M5 composition (replace the stand-in commitment by WHIR, out-of-domain sample at commit time per WHIR §2.2, public backend API), then M6 measurements.
+
+### HyperPlonk M5: composition, first end-to-end proofs
+- `backend/hyperplonk/bn254`: Setup/Prove/Verify = HyperPlonk PIOP + one WHIR opening per committed polynomial; unique decoding (default) or Johnson. gnark's shared circuit suite passes end to end (31 circuits; 2 with api.Commit skipped). Tampered proofs, wrong keys, wrong public inputs rejected.
+- First measurement (2^13 rows): UD 3.0 MiB / prove 0.26 s / verify 34 ms; Johnson 1.2 MiB / 0.25 s / 14 ms. Larger than plonkfri (0.84 MiB at 2^16) because 8 polynomials are opened separately; prover time is lower.
+- Security status table: `docs/hyperplonk/THEORY.md` §10. Not zero-knowledge, not reviewed. Open theory: per-polynomial composition theorem (only the batched one is stated formally), round-by-round soundness of the whole PIOP (Q1), Fiat–Shamir for the hash-chain transcript, WHIR fold bound and the Johnson preprints unread.
+- Next (to be decided with the user): (1) close the theory gaps of §10; (2) reduce proof size — batch all polynomials into one WHIR test (Construction 7.4, which is also the form Thm 7.5 covers), Merkle path sharing; (3) backend ID + serialization; (4) zero knowledge.
+
+### HyperPlonk: batched opening (D4)
+- User chose batching first. Implemented WHIR Construction 7.4: all polynomials opened by one proof on their random combination; four polynomials in μ+3 variables (selectors stacked, s_σ and w padded).
+- Measured at 2^13 rows: UD 3027 → 888 KiB (verify 6 ms), Johnson 1186 → 401 KiB (verify 2 ms); prove ≈ 0.24 s unchanged.
+- Theory: THEORY S14 (padding/stacking), S15 (preprocessed polynomials in Construction 7.4); composition gap of §10 reduced to Q1 and the unread proof of Thm 7.5.
+- Next: theory gaps (round-by-round state function for the PIOP, Fiat–Shamir for the hash chain, fold bound), then backend ID + serialization, then zero knowledge.
+
+### HyperPlonk: theory gaps
+- THEORY §11: round-by-round state function and per-round errors for the whole PIOP (self-derived; maximum 2^(μ+3)/|F|). §10 updated.
+- Fiat–Shamir: the BCS transformation (ePrint 2016/116 §6) is a hash chain σ_i = ρ₂(rt_i ‖ σ_{i−1}) with challenges ρ₁(x ‖ σ_{i−1}); our transcript has the same structure, differences listed in THEORY S16 (argued, not proven). Bound: BCS Thm 7.1.
+- WHIR Thm 4.20 read with proof. Merkle prefixes changed to 0x10/0x11 (disjoint from the transcript's).
+- Remaining unread proofs: WHIR Thm 7.5, Claim 5.3; BCS Thm 7.1; s̄_sr ≤ b·ε_rbr; ePrint 2025/2110, 2025/2051.
+- Next: backend ID + dispatcher + serialization; then zero knowledge. External review would be the appropriate check for §11, S14–S16.
+
+### HyperPlonk: backend ID, dispatcher, serialization
+- `backend.HYPERPLONK`; `backend/hyperplonk` public API mirroring plonk/plonkfri; binary encodings for proof, proving key and verifying key with bounded decoding. Tests incl. truncation, 3548 bit flips, fuzzing (45 s clean).
+- `internal/stats`: iterate over `stats.Backends()` (groth16, plonk) instead of `backend.Implemented()` — fixes the stats test that was red since PLONKFRI was registered. `TestVersion` in the repository root still fails; it did before this work (checked on a stash).
+- Next: zero knowledge (largest remaining piece; THEORY Q5), or reading the remaining proofs, or measurements against plonkfri on the same circuit — to be decided with the user.
+
+### HyperPlonk: comparison with plonk and plonkfri
+- `backend/hyperplonk/compare_test.go` (tag `hpcompare`), same circuit as the other backends' perf tests, median of 3. At 2^16 rows: plonk (KZG) 0.5 KiB / prove 0.53 s / verify 1.2 ms; plonkfri 990 KiB / 2.01 s / 3.8 ms; hyperplonk UD 979 KiB / 2.00 s / 7.0 ms; hyperplonk Johnson 440 KiB / 1.99 s / 2.7 ms. Full table and caveats (plonkfri is ZK, hyperplonk not yet; regimes differ) in `docs/hyperplonk/PLAN.md` §6.
+- Next: zero knowledge — reading and a design for the user's approval before any code.
+
+### HyperPlonk: zero-knowledge analysis
+- `docs/hyperplonk/ZK-DESIGN.md`: inventory of what the proof leaks (5 items), the building blocks in the literature and how far each fits, three options (A full ZK, B commitment layer only, C stop at soundness). No source covers the combination for HyperPlonk over WHIR.
+- Finding: our padding variable (first variable) cannot carry blinding — a Merkle leaf holds x and −x and F(x) + F(−x) cancels the padding half. Blinding must go into the last variable (highest coefficients).
+- Open decision (user): A or C. ePrint 2026/391 §4–§11 not yet read.
+
+### HyperPlonk: zero-knowledge exploration
+- User asked to explore ZK and look for a solution. Candidate construction written in `docs/hyperplonk/ZK-DESIGN.md` §7–§10: all polynomials stay multilinear; random rows (w), an unconstrained random subtree (ṽ), Libra-style ZK sumcheck, and a hiding opening (blinding half in the last variable, mask polynomial in the batch, salted leaves).
+- Experiments in `backend/hyperplonk/internal/zkexp` (tests only): blinding in the first variable has rank 48/96 (leaks), in the last variable 96/96; random rows give rank 4/4 on the opened values of w; ZK sumcheck transcript distributions identical for 906 pairs over F₇.
+- Literature search: closest published treatment is ePrint 2026/2880 (Feneuil, Provin, Rivain, "Sum-Checking SmallWood", hiding multilinear extensions) — could not be fetched (403); to be downloaded by the user together with the work it cites for random padding.
+- Not implemented. Own claims still to prove/test: the modified product check, the simulation argument and its rank conditions, the composition.
+
+### HyperPlonk ZK: published framework found
+- User downloaded ePrint 2026/2880 (Sum-Checking SmallWood) → `resources/`. Read §3 intro, §3.1, §4.1, §5.1. It provides hiding multilinear extensions (random padding with "nullified" mask positions — our random-rows idea), one-time-pad masking of sumcheck messages with linear constraints on the committed pad, and compiler theorems (Thm 2, Thm 3) giving HVZK + round-by-round knowledge soundness from a sumcheck-based IP and a ZK linear commitment scheme.
+- Obstacle: their definition has one witness committed up front; our PIOP commits to the product polynomial ṽ mid-protocol. Proposed route R1: prove the grand products by layered sumcheck (GKR) and drop ṽ — also smaller and simpler without ZK.
+- `docs/hyperplonk/ZK-DESIGN.md` §11–§12: mapping and staged plan S0 (GKR wiring, non-ZK) → S1 (hiding extension) → S2 (masked messages) → S3 (ZK WHIR). Awaiting user approval before S0.
+
+### HyperPlonk ZK stage S0: wiring by layered sumcheck
+- User approved the staged plan. S0 done: `internal/grandprod` (GKR grand-product equality), `permcheck` on top of it, product polynomial and `prodcheck` removed; the prover commits to w only.
+- Measured at 2^16 rows: prove 2.00 → 1.36 s, proof 979 → 831 KiB (UD), 440 → 363 KiB (Johnson); plonkfri 2.13 s / 990 KiB in the same run. Still not zero-knowledge.
+- Theory: THEORY S17, §12 (error budget and round-by-round state for the new wiring argument).
+- Next: S1 (random rows + rank test), S2 (masked messages; read ePrint 2026/2880 §3.2, App. C first), S3 (ZK WHIR).
+
+### HyperPlonk ZK stage S1: random rows
+- Random rows and a random fourth column in w; rank tests on the points real proofs open (rank 5/5 at the PIOP level, 6 of 7 in the evaluation table with the seventh identically zero). Proofs are randomized from now on.
+- Open: a bound for the probability of a rank-deficient set of points; stages S2 (masked sumcheck messages; read ePrint 2026/2880 §3.2 and App. C first) and S3 (ZK WHIR).
+
+### HyperPlonk ZK stage S2: masked messages
+- Read ePrint 2026/2880 §3.2. Implemented the "commit, blindly interact, prove" form: pad in the fourth column of w, every witness-dependent PIOP message masked, verifier checks turned into linear constraints on the pad (products linearized), merged into one linear form proven by WHIR (`whir.Form`). Least circuit size is now 2^9 rows.
+- All tests green; 10 constraint mutations caught (three needed new prover deviations); fuzz false alarm again from randomized proofs (fixture pad made deterministic).
+- Measured at 2^16: prove 1.40 s, verify 18.6 ms (was 7.5 ms), proof 828 KiB (UD) / 360 KiB (Johnson).
+- Not yet zero-knowledge: the WHIR opening still depends on the witness. Next: S3 (blinding half in the last variable, mask polynomial in the batch, salted leaves) after reading ePrint 2026/391 §4–§10 or writing the simulation argument of ZK-DESIGN §8.
+
+### HyperPlonk ZK stage S3: hiding opening; all stages done
+- Read ePrint 2026/391 §2.2, §2.5, §7. Chose its simple masking protocol (Construction 7.2, Thm 7.1) over the efficient one (which needs a rewrite of WHIR into interleaved codes), with WHIR run on the masked combination instead of sending it in clear; the reduction to Lemma 7.3 is ours.
+- Built: blinding half of W in the last variable, salted prover trees, mask polynomial inside the opening, `internal/rnd`, minimum 2^10 rows (UD) / 2^9 (Johnson).
+- Tests: rank 387/387 on opened leaves (reduced query count), 11/11 on W's form values, opening depends only on the masked combination; all earlier soundness tests green; fuzz clean.
+- Final comparison at 2^16 rows: plonkfri 2.14 s / 4.1 ms / 990 KiB; hyperplonk UD 2.41 s / 19.5 ms / 1008 KiB; hyperplonk Johnson 2.35 s / 14.7 ms / 464 KiB.
+- Status: sound by the arguments of THEORY §10–§13; honest-verifier zero-knowledge claimed, not proven as one theorem (ZK-DESIGN §14 lists what is ours). Unreviewed.
+- Open: full-size joint rank test; bound on rank-deficient points; matching WHIR-with-mask against the LCS definition of ePrint 2026/2880; unread proofs (THEORY §10); verifier and prover optimisation; external review.
+
+### HyperPlonk: strengthening the zero-knowledge claim
+- `bn254.TestJointRank` (`HP_JOINT_RANK=1`, 43 s): joint rank over all values one proof reveals about W — full for 4 proofs (Johnson 1436/1436, 1404/1404; UD 2460/2460 twice).
+- Rank-deficiency probability (ZK-DESIGN §15.2): matrix is block triangular; codeword rows (Vandermonde, certain), out-of-domain rows (≤ (2k+3)/|F|) and PIOP rows (≤ (2μ+2)/|F|) proven; the six cross-evaluation rows bounded by (6μ−2)/|F| only if a minor polynomial is not identically zero for the opened set — certified per tested proof, not proven in general.
+- Definitions of ePrint 2026/2880 read (Defs 1–7, 10–11, Thms 2–3 statements) and matched (§15.3). Differences from Thm 3: witness and pad share one commitment; preprocessed polynomials; values revealed beyond the statement.
+- Open: general non-degeneracy for the cross-evaluation rows; HVZK in the programmable-ROM form of their Def. 7; unread proofs.
+
+### HyperPlonk: remaining proofs read
+- Read and followed: WHIR Claim 5.3 and the proof of Thm 7.5; ePrint 2026/2880 Lemma 3 and the zero-knowledge proofs of Thms 2, 3; ePrint 2026/391 Lemma 7.3. BCS Lemma 7.3 in outline. ePrint 2019/834 Thm 8.6 statement (round-by-round → BCS argument, incl. zero knowledge). Haböck's note 2025/2110 in full — it rests on ePrint 2020/654 §5, not read, so the Johnson regime stays "preprint, not verified by us". Details: THEORY §14.
+- Self-derived: state-restoration error ≤ b·ε_rbr (S20).
+- Differences from the theorem statements, now precise: non-oracle prover messages (WHIR Construction 7.4), preprocessed polynomials, padding/stacking, one commitment where ePrint 2026/2880 Thm 3 has two.
+- Not read: BCS Lemmas 3.2, 7.2; proof of 2019/834 Thm 8.6; soundness parts of 2026/2880 Thms 2, 3; 2020/654 §5; 2025/2051 §9; ZK-WHIR §4–§6, §8–§11.
+
+### HyperPlonk: zero knowledge removed, performance work
+- User decision: remove zero knowledge; the backend is supposed to be much more performant than plonkfri. Code restored to the post-S0 state; ZK stages S1–S3 preserved on local branch `hyperplonk-whir-zk` (not pushed).
+- Performance: polynomials at natural size (4 polynomials in μ+2 variables), parallel loops (`internal/par`), cached FFT domains. At 2^16 rows: prove 290 ms (plonkfri 2070 ms, KZG plonk 531 ms), verify 7.5 ms, proof 887 KiB (UD); Johnson: 288 ms, 3.4 ms, 399 KiB. Table in `docs/hyperplonk/PLAN.md` §6.
+- Tests green incl. race detector and fuzz. One bug introduced and fixed during the work (leaf slices sharing capacity).
+- Remaining cost: FFT ≈ 40 % of CPU, Merkle hashing ≈ 6 %. Further levers not taken: cheaper encoding of the later WHIR oracles, Merkle path sharing, verifier optimisation.
+
+### HyperPlonk: branch pushed
+- User stopped further optimisation and asked for the work to be pushed. `hyperplonk-whir` pushed to `origin` (first push of this work; it includes the 5 commits of `pq-pcs-pause` that were ahead of its remote).
+- Not pushed: `hyperplonk-whir-zk` (ZK variant, local only). `feature/hyperplonk` (Angelo's) untouched.
+- Open: theory items in `docs/hyperplonk/THEORY.md` §10, §14; whether to push the ZK branch; no PR opened.
+- Afterwards, by user request: dates removed from `PROJECT.md` and `docs/hyperplonk/` (session-log entries are now undated, in chronological order), and the branch squashed into one commit on top of `master` and force-pushed. `CLAUDE.md` step 3 now asks for undated entries.

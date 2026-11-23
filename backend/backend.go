@@ -20,11 +20,12 @@ const (
 	GROTH16
 	PLONK
 	PLONKFRI
+	HYPERPLONK
 )
 
 // Implemented return the list of proof systems implemented in gnark
 func Implemented() []ID {
-	return []ID{GROTH16, PLONK, PLONKFRI}
+	return []ID{GROTH16, PLONK, PLONKFRI, HYPERPLONK}
 }
 
 // String returns the string representation of a proof system
@@ -36,6 +37,8 @@ func (id ID) String() string {
 		return "plonk"
 	case PLONKFRI:
 		return "plonkFRI"
+	case HYPERPLONK:
+		return "hyperplonk"
 	default:
 		return "unknown"
 	}
@@ -50,6 +53,8 @@ func IDFromString(s string) ID {
 		return PLONK
 	case "plonkFRI":
 		return PLONKFRI
+	case "hyperplonk":
+		return HYPERPLONK
 	default:
 		return UNKNOWN
 	}

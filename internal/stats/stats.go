@@ -42,7 +42,7 @@ func (s *globalStats) WriteTo(w io.Writer) (int64, error) {
 	// write data
 	for _, circuitName := range circuitNames {
 		innerStats := s.Stats[circuitName]
-		for _, backendID := range backend.Implemented() {
+		for _, backendID := range Backends() {
 			if _, ok := innerStats[backendID]; !ok {
 				// if we don't have stats for this backend, we skip it. This can
 				// happen when a snippet is only registered for some backends.
@@ -105,6 +105,14 @@ func (s *globalStats) Load(path string) error {
 	}
 
 	return nil
+}
+
+// Backends lists the backends for which constraint statistics are recorded.
+// The statistics depend only on the constraint system: R1CS for groth16, SCS
+// for plonk. plonkfri and hyperplonk consume the same SCS as plonk and have
+// no statistics of their own.
+func Backends() []backend.ID {
+	return []backend.ID{backend.GROTH16, backend.PLONK}
 }
 
 func NewSnippetStats(curve ecc.ID, backendID backend.ID, circuit frontend.Circuit) (snippetStats, error) {
